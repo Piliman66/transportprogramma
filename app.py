@@ -669,6 +669,13 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 .card{background:#fff;padding:16px;border-radius:6px;margin-bottom:16px}
 .badge{padding:2px 8px;border-radius:10px;background:#e3e8ef;font-size:12px}
 .row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.tabs{display:flex;gap:4px;border-bottom:2px solid #1f3a5f;margin-bottom:12px}
+.tabs a{padding:8px 16px;background:#e3e8ef;color:#222;text-decoration:none;border-radius:4px 4px 0 0}
+.tabs a.active{background:#1f3a5f;color:#fff}
+.form-table{background:#fff}
+.form-table th{text-align:left;width:240px;font-weight:600;font-size:13px;background:#f4f5f7;vertical-align:middle}
+.form-table td{padding:4px 8px}
+.form-table td input[type=text],.form-table td input[type=number],.form-table td textarea{max-width:520px}
 </style>
 </head>
 <body>
@@ -677,8 +684,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <strong>Transportbeheer</strong>
   <nav>
     <a href="{{ url_for('transports') }}">Transporten</a>
-    <a href="{{ url_for('relaties', soort='vervoerder') }}">Vervoerders</a>
-    <a href="{{ url_for('relaties', soort='opdrachtgever') }}">Opdrachtgevers</a>
+    <a href="{{ url_for('relaties') }}">Relaties</a>
     {% if user['role'] == 'beheerder' %}<a href="{{ url_for('users') }}">Gebruikers</a>{% endif %}
     <a href="{{ url_for('logout') }}">Uitloggen ({{ user['name'] }})</a>
   </nav>
@@ -818,9 +824,21 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 {% endblock %}""",
 
 "relaties.html": """{% extends "base.html" %}{% block content %}
+<div class="tabs">
+  <a href="{{ url_for('relaties') }}" class="{{ 'active' if not soort else '' }}">Alle relaties</a>
+  <a href="{{ url_for('relaties', soort='vervoerder') }}" class="{{ 'active' if soort == 'vervoerder' else '' }}">Vervoerders</a>
+  <a href="{{ url_for('relaties', soort='opdrachtgever') }}" class="{{ 'active' if soort == 'opdrachtgever' else '' }}">Opdrachtgevers</a>
+</div>
 <div class="row">
   <h2>{{ title }}</h2>
-  {% if soort %}<a class="btn" href="{{ url_for('relatie_new', soort=soort) }}">+ Nieuwe {{ SOORTEN[soort][1]|lower }}</a>{% endif %}
+  <div>
+  {% if soort %}
+    <a class="btn" href="{{ url_for('relatie_new', soort=soort) }}">+ Nieuwe {{ SOORTEN[soort][1]|lower }}</a>
+  {% else %}
+    <a class="btn" href="{{ url_for('relatie_new', soort='vervoerder') }}">+ Nieuwe vervoerder</a>
+    <a class="btn" href="{{ url_for('relatie_new', soort='opdrachtgever') }}">+ Nieuwe opdrachtgever</a>
+  {% endif %}
+  </div>
 </div>
 <form method="get" class="card row">
   <input type="hidden" name="soort" value="{{ soort }}">
@@ -845,26 +863,28 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 
 "relatie_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
-<form method="post" action="{{ action }}" class="card">
-  <div class="grid">
+<form method="post" action="{{ action }}" class="card" style="padding:0;overflow:hidden">
+  <div class="tabs" style="margin:0;padding:8px 8px 0;background:#e3e8ef;border-bottom-width:1px">
+    <a class="active">Relatie details</a>
+  </div>
+  <table class="form-table">
   {% for name, label, kind in fields %}
-    {% if kind == 'bool' %}
-    <label style="flex-direction:row;align-items:center;gap:8px">
-      <input type="checkbox" name="{{ name }}" {% if c[name] %}checked{% endif %}> {{ label }}
-    </label>
-    {% else %}
-    <label>{{ label }}
-      {% if kind == 'textarea' %}
+    <tr>
+      <th>{{ label }}</th>
+      <td>
+      {% if kind == 'bool' %}
+        <input type="checkbox" name="{{ name }}" {% if c[name] %}checked{% endif %}>
+      {% elif kind == 'textarea' %}
         <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
       {% else %}
         <input type="{{ 'number' if kind == 'number' else 'text' }}" {% if kind == 'number' %}step="any"{% endif %}
                name="{{ name }}" value="{{ c[name] if c[name] is not none else '' }}">
       {% endif %}
-    </label>
-    {% endif %}
+      </td>
+    </tr>
   {% endfor %}
-  </div>
-  <p><button>Opslaan</button> <a href="{{ url_for('relaties') }}">Annuleren</a></p>
+  </table>
+  <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('relaties') }}">Annuleren</a></p>
 </form>
 {% endblock %}""",
 

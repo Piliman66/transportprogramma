@@ -1,4 +1,3 @@
-
 import csv
 import io
 import os
@@ -37,8 +36,6 @@ RELATION_FIELDS = [
     ("visit_city", "Bezoekadres plaats", "text"),
     ("visit_country", "Bezoekadres land", "text"),
     ("regio", "Regio", "text"),
-    ("laadadres", "Laadadres", "textarea"),
-    ("losadres", "Losadres", "textarea"),
     ("telefoon", "Telefoon", "text"),
     ("fax", "Fax", "text"),
     ("email", "E-mail adres", "text"),
@@ -88,12 +85,7 @@ TRANSPORT_FIELDS = [
     ("laad_datum", "Laaddatum", "date"),
     ("laad_tijd_van", "Laadtijd van", "text"),
     ("laad_tijd_tot", "Laadtijd tot", "text"),
-    ("laad_openingstijden", "Openingstijden laden", "text"),
-    ("laad_plaatscode", "Laadplaatscode", "text"),
-    ("laad_naam", "Laadplaats naam", "text"),
-    ("pickup_address", "Laadadres", "textarea"),
-    ("laad_postcode", "Laadplaats postcode", "text"),
-    ("laad_plaats", "Laadplaats", "text"),
+    ("laad_locatie_id", "Laadplaatscode", "rel_locatie"),
     ("bijz_laden_code", "Bijzonderheden laden code", "text"),
     ("bijz_laden_1", "Bijzonderheden laden", "text"),
     ("bijz_laden_2", "Bijzonderheden laden (2)", "text"),
@@ -108,12 +100,7 @@ TRANSPORT_FIELDS = [
     ("los_datum", "Losdatum", "date"),
     ("los_tijd_van", "Lostijd van", "text"),
     ("los_tijd_tot", "Lostijd tot", "text"),
-    ("los_openingstijden", "Openingstijden lossen", "text"),
-    ("los_plaatscode", "Losplaatscode", "text"),
-    ("los_naam", "Losplaats naam", "text"),
-    ("delivery_address", "Losadres", "textarea"),
-    ("los_postcode", "Losplaats postcode", "text"),
-    ("los_plaats", "Losplaats", "text"),
+    ("los_locatie_id", "Losplaatscode", "rel_locatie"),
     ("receiver", "Ontvanger", "text"),
     ("bijz_lossen_code", "Bijzonderheden lossen code", "text"),
     ("bijz_lossen_1", "Bijzonderheden lossen", "text"),
@@ -123,6 +110,7 @@ TRANSPORT_FIELDS = [
     ("laadadres_geladen", "Laadadres geladen", "text"),
     ("losadres_gelost", "Losadres gelost", "text"),
     ("losadres_geladen", "Losadres geladen", "text"),
+ 
     ("bijlage", "Bijlage", "text"),
     ("bijlage_cmr", "Bijlage CMR", "text"),
     ("palletbon_verstuurd_op", "Palletbon verstuurd op", "date"),
@@ -159,6 +147,16 @@ CREATE TABLE IF NOT EXISTS relaties (
     soort TEXT NOT NULL CHECK (soort IN ('vervoerder', 'opdrachtgever')),
     code TEXT UNIQUE NOT NULL,
     {REL_COLS}
+);
+CREATE TABLE IF NOT EXISTS locaties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    naam TEXT NOT NULL,
+    adres TEXT,
+    postcode TEXT,
+    plaats TEXT,
+    land TEXT,
+    openingstijden TEXT
 );
 CREATE TABLE IF NOT EXISTS transports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,7 +217,7 @@ def init_db():
     have = {r[1] for r in db.execute("PRAGMA table_info(transports)")}
     for name, _, kind in TRANSPORT_FIELDS:
         if name not in have:
-            sqltype = "INTEGER" if kind == "bool" else "TEXT"
+            sqltype = "INTEGER" if kind in ("bool", "rel_locatie") else "TEXT"
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
     db.commit()
     count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -319,7 +317,7 @@ def parse_transport_form():
             except ValueError:
                 errors.append(f"Ongeldige waarde voor {name}.")
                 data[name] = None
-        elif name in ("customer_id", "carrier_id"):
+        elif name in ("customer_id", "carrier_id", "laad_locatie_id", "los_locatie_id"):
             data[name] = int(raw) if raw.isdigit() else None
         else:
             data[name] = raw or None
@@ -373,9 +371,12 @@ def render_form(t, title, action):
     # gegevens per relatie, voor automatisch invullen van de velden in het formulier
     rels = {str(r["id"]): {k: (r[k] if r[k] is not None else "") for k in r.keys()}
             for r in db.execute("SELECT * FROM relaties")}
+    locaties = db.execute("SELECT * FROM locaties ORDER BY code").fetchall()
+    locs = {str(l["id"]): {k: (l[k] if l[k] is not None else "") for k in l.keys()}
+            for l in locaties}
     return render_template("transport_form.html", t=t, title=title, action=action,
                            fields=TRANSPORT_FIELDS, options=OPTIONS,
-                           relations=relations, rels=rels,
+                           relations=relations, rels=rels, locaties=locaties, locs=locs,
                            F={n: (l, k) for n, l, k in TRANSPORT_FIELDS})
  
  
@@ -459,9 +460,12 @@ def transport_detail(tid):
            FROM status_history h LEFT JOIN users u ON u.id = h.changed_by
            WHERE h.transport_id = ? ORDER BY h.id DESC""", (tid,)).fetchall()
     related = {}
-    for key in ("customer_id", "carrier_id"):
+    for key in ("customer_id", "carrier_id", "laad_locatie_id", "los_locatie_id"):
         related[key] = None
-        if t[key]:
+        if t[key] and key.endswith("locatie_id"):
+            related[key] = db.execute(
+                "SELECT id, code, naam AS name FROM locaties WHERE id = ?", (t[key],)).fetchone()
+        elif t[key]:
             related[key] = db.execute(
                 "SELECT id, code, name FROM relaties WHERE id = ?", (t[key],)).fetchone()
     return render_template("transport_detail.html", t=t, history=history,
@@ -616,6 +620,100 @@ def relatie_delete(rid):
     return redirect(url_for("relaties"))
  
  
+# ---------- routes: locaties (laad- en losplaatsen) ----------
+ 
+LOC_FIELDS = [
+    ("naam", "Naam", "text"),
+    ("adres", "Adres", "text"),
+    ("postcode", "Postcode", "text"),
+    ("plaats", "Plaats", "text"),
+    ("land", "Land", "text"),
+    ("openingstijden", "Openingstijden", "textarea"),
+]
+LOC_NAMES = [n for n, _, _ in LOC_FIELDS]
+ 
+ 
+def next_location_code():
+    db = get_db()
+    db.execute("INSERT INTO counters (soort, n) VALUES ('locatie', 0) ON CONFLICT(soort) DO NOTHING")
+    db.execute("UPDATE counters SET n = n + 1 WHERE soort = 'locatie'")
+    n = db.execute("SELECT n FROM counters WHERE soort = 'locatie'").fetchone()["n"]
+    return f"L{n:05d}"
+ 
+ 
+def parse_location_form():
+    data = {n: (request.form.get(n, "").strip() or None) for n in LOC_NAMES}
+    errors = [] if data["naam"] else ["Naam is verplicht."]
+    return data, errors
+ 
+ 
+@app.route("/locaties")
+@login_required
+def locaties():
+    rows = get_db().execute("SELECT * FROM locaties ORDER BY code").fetchall()
+    return render_template("locaties.html", rows=rows)
+ 
+ 
+@app.route("/locaties/nieuw", methods=["GET", "POST"])
+@login_required
+def locatie_new():
+    if request.method == "POST":
+        data, errors = parse_location_form()
+        if errors:
+            for e in errors:
+                flash(e)
+            return render_template("locatie_form.html", c=data, title="Nieuwe locatie",
+                                   action=url_for("locatie_new"), fields=LOC_FIELDS)
+        db = get_db()
+        code = next_location_code()
+        db.execute(
+            f"INSERT INTO locaties (code, {', '.join(LOC_NAMES)}) "
+            f"VALUES (?, {', '.join('?' * len(LOC_NAMES))})",
+            [code] + [data[n] for n in LOC_NAMES])
+        db.commit()
+        flash(f"Locatie {code} aangemaakt.")
+        return redirect(url_for("locaties"))
+    return render_template("locatie_form.html", c={n: None for n in LOC_NAMES},
+                           title="Nieuwe locatie", action=url_for("locatie_new"), fields=LOC_FIELDS)
+ 
+ 
+@app.route("/locaties/<int:lid>/bewerk", methods=["GET", "POST"])
+@login_required
+def locatie_edit(lid):
+    db = get_db()
+    c = db.execute("SELECT * FROM locaties WHERE id = ?", (lid,)).fetchone()
+    if c is None:
+        abort(404)
+    action = url_for("locatie_edit", lid=lid)
+    if request.method == "POST":
+        data, errors = parse_location_form()
+        if errors:
+            for e in errors:
+                flash(e)
+            return render_template("locatie_form.html", c=data, title=f"Bewerk {c['code']}",
+                                   action=action, fields=LOC_FIELDS)
+        sets = ", ".join(f"{n} = ?" for n in LOC_NAMES)
+        db.execute(f"UPDATE locaties SET {sets} WHERE id = ?",
+                   [data[n] for n in LOC_NAMES] + [lid])
+        db.commit()
+        flash("Locatie opgeslagen.")
+        return redirect(url_for("locaties"))
+    return render_template("locatie_form.html", c=c, title=f"Bewerk {c['code']}",
+                           action=action, fields=LOC_FIELDS)
+ 
+ 
+@app.route("/locaties/<int:lid>/verwijder", methods=["POST"])
+@admin_required
+def locatie_delete(lid):
+    db = get_db()
+    db.execute("UPDATE transports SET laad_locatie_id = NULL WHERE laad_locatie_id = ?", (lid,))
+    db.execute("UPDATE transports SET los_locatie_id = NULL WHERE los_locatie_id = ?", (lid,))
+    db.execute("DELETE FROM locaties WHERE id = ?", (lid,))
+    db.commit()
+    flash("Locatie verwijderd. Gekoppelde transporten hebben die locatie niet meer.")
+    return redirect(url_for("locaties"))
+ 
+ 
 # ---------- export (alleen beheerder) ----------
  
 def csv_response(filename, headers, rows):
@@ -636,7 +734,8 @@ def export_transports():
     rows = get_db().execute(
         "SELECT t.number, cu.code AS cust_code, cu.name AS cust_name, "
         "c.code AS carr_code, c.name AS carr_name, "
-        + ", ".join(f"t.{k}" for k in keys) + ", t.created_at, t.updated_at "
+        + ", ".join(f"(SELECT code FROM locaties WHERE id = t.{k}) AS {k}" if k.endswith("locatie_id")
+                    else f"t.{k}" for k in keys) + ", t.created_at, t.updated_at "
         "FROM transports t LEFT JOIN relaties cu ON cu.id = t.customer_id "
         "LEFT JOIN relaties c ON c.id = t.carrier_id ORDER BY t.id").fetchall()
     labels = {n: l for n, l, _ in TRANSPORT_FIELDS}
@@ -754,6 +853,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <nav>
     <a href="{{ url_for('transports') }}">Transporten</a>
     <a href="{{ url_for('relaties') }}">Relaties</a>
+    <a href="{{ url_for('locaties') }}">Locaties</a>
     {% if user['role'] == 'beheerder' %}<a href="{{ url_for('users') }}">Gebruikers</a>{% endif %}
     <a href="{{ url_for('logout') }}">Uitloggen ({{ user['name'] }})</a>
   </nav>
@@ -873,12 +973,24 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('laad_datum') }}
   {{ f('laad_tijd_van') }}
   {{ f('laad_tijd_tot') }}
-  {{ f('laad_openingstijden') }}
-  {{ f('laad_plaatscode') }}
-  {{ f('laad_naam') }}
-  {{ f('pickup_address', True) }}
-  {{ f('laad_postcode') }}
-  {{ f('laad_plaats') }}
+  <span class="lbl">Openingstijden</span>
+  <input id="l_openingstijden" readonly>
+  <span class="lbl">Laadplaatscode</span>
+  <select name="laad_locatie_id">
+    <option value="">— kies een laadplaats —</option>
+    {% for l in locaties %}<option value="{{ l['id'] }}" {% if t['laad_locatie_id'] == l['id'] %}selected{% endif %}>{{ l['code'] }} – {{ l['naam'] }}</option>{% endfor %}
+  </select>
+  <span class="lbl">Laadplaats naam</span>
+  <input id="l_naam" readonly>
+  <span class="lbl">Adres</span>
+  <input id="l_adres" readonly>
+  <span class="lbl">Postcode</span>
+  <input id="l_postcode" readonly>
+  <span class="lbl">Plaats</span>
+  <input id="l_plaats" readonly>
+  <span class="lbl">Land</span>
+  <input id="l_land" readonly>
+  <span class="lbl"></span><span></span>
   {{ f('bijz_laden_code') }}
   {{ f('bijz_laden_1') }}
   {{ f('bijz_laden_2', True) }}
@@ -895,12 +1007,24 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('los_datum') }}
   {{ f('los_tijd_van') }}
   {{ f('los_tijd_tot') }}
-  {{ f('los_openingstijden') }}
-  {{ f('los_plaatscode') }}
-  {{ f('los_naam') }}
-  {{ f('delivery_address', True) }}
-  {{ f('los_postcode') }}
-  {{ f('los_plaats') }}
+  <span class="lbl">Openingstijden</span>
+  <input id="lo_openingstijden" readonly>
+  <span class="lbl">Losplaatscode</span>
+  <select name="los_locatie_id">
+    <option value="">— kies een losplaats —</option>
+    {% for l in locaties %}<option value="{{ l['id'] }}" {% if t['los_locatie_id'] == l['id'] %}selected{% endif %}>{{ l['code'] }} – {{ l['naam'] }}</option>{% endfor %}
+  </select>
+  <span class="lbl">Losplaats naam</span>
+  <input id="lo_naam" readonly>
+  <span class="lbl">Adres</span>
+  <input id="lo_adres" readonly>
+  <span class="lbl">Postcode</span>
+  <input id="lo_postcode" readonly>
+  <span class="lbl">Plaats</span>
+  <input id="lo_plaats" readonly>
+  <span class="lbl">Land</span>
+  <input id="lo_land" readonly>
+  <span class="lbl"></span><span></span>
   {{ f('receiver') }}
   {{ f('bijz_lossen_code') }}
   {{ f('bijz_lossen_1') }}
@@ -938,18 +1062,25 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     const r = REL[byName('carrier_id').value];
     setVal('v_name', r && r.name);
   }
-  function fillAddresses() {
-    // laad- en losadres alleen invullen als ze nog leeg zijn
-    const r = REL[byName('customer_id').value];
-    if (!r) return;
-    const p = byName('pickup_address'), d = byName('delivery_address');
-    if (p && !p.value) p.value = r.laadadres || '';
-    if (d && !d.value) d.value = r.losadres || '';
+  // locaties (laad- en losplaatsen): vul de velden in vanuit de gekozen locatie
+  const LOC = {{ locs|tojson }};
+  function showLoc(selName, p) {
+    const l = LOC[byName(selName).value];
+    setVal(p + 'naam', l && l.naam);
+    setVal(p + 'adres', l && l.adres);
+    setVal(p + 'postcode', l && l.postcode);
+    setVal(p + 'plaats', l && l.plaats);
+    setVal(p + 'land', l && l.land);
+    setVal(p + 'openingstijden', l && l.openingstijden);
   }
-  byName('customer_id').addEventListener('change', () => { showCustomer(); fillAddresses(); });
+  byName('customer_id').addEventListener('change', showCustomer);
   byName('carrier_id').addEventListener('change', showCarrier);
+  byName('laad_locatie_id').addEventListener('change', () => showLoc('laad_locatie_id', 'l_'));
+  byName('los_locatie_id').addEventListener('change', () => showLoc('los_locatie_id', 'lo_'));
   showCustomer();
   showCarrier();
+  showLoc('laad_locatie_id', 'l_');
+  showLoc('los_locatie_id', 'lo_');
 </script>
 {% endblock %}""",
  
@@ -979,7 +1110,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {% for name, label, kind in fields %}
   {% if kind.startswith('rel_') %}
     {% set r = related[name] %}
-    <tr><th style="width:220px">{{ label }}</th><td>{% if r %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }} – {{ r['name'] }}</a>{% else %}-{% endif %}</td></tr>
+    <tr><th style="width:220px">{{ label }}</th><td>{% if r %}{% if kind == 'rel_locatie' %}{{ r['code'] }} – {{ r['name'] }}{% else %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }} – {{ r['name'] }}</a>{% endif %}{% else %}-{% endif %}</td></tr>
   {% else %}
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name] if t[name] is not none else '') }}</td></tr>
   {% endif %}
@@ -1095,7 +1226,6 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     {{ card('Relatie info', ['historisch', 'zoektekst', 'regio', 'taal', 'relatiesoort', 'deelmarkt', 'wagenpark_code', 'contactpersoon', 'contactpersoon_functie', 'contactpersoon_telefoon']) }}
     {{ card('Contact', ['telefoon', 'fax', 'email', 'email_planning', 'email_boekhouding']) }}
     {{ card('Postadres en bezoekadres', ['post_address', 'post_postcode', 'post_city', 'post_country', 'visit_address', 'visit_postcode', 'visit_city', 'visit_country']) }}
-    {{ card('Laad- en losadres', ['laadadres', 'losadres']) }}
     {{ card('Facturatie', ['debiteur_code', 'debiteur_contactpersoon', 'valuta', 'btw_code', 'btw_omschrijving', 'btw_nummer', 'betalingsconditie', 'betalingsconditie_omschrijving', 'aantal_kopiefacturen', 'digitaal_factureren', 'verzamelfactuur', 'geen_efactuur_xml', 'factuur_layout', 'debiteurgroep', 'toeslag_procent']) }}
     {{ card('Informatie', ['informatie', 'attentie']) }}
   </div>
@@ -1124,6 +1254,53 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     {% endfor %}
   </table>
 </div>
+{% endblock %}""",
+ 
+"locaties.html": """{% extends "base.html" %}{% block content %}
+<div class="row">
+  <h2>Locaties (laad- en losplaatsen)</h2>
+  <a class="btn" href="{{ url_for('locatie_new') }}">+ Nieuwe locatie</a>
+</div>
+<table>
+<tr><th>Code</th><th>Naam</th><th>Plaats</th><th>Land</th><th>Openingstijden</th><th></th></tr>
+{% for l in rows %}
+<tr>
+  <td>{{ l['code'] }}</td>
+  <td><a href="{{ url_for('locatie_edit', lid=l['id']) }}">{{ l['naam'] }}</a></td>
+  <td>{{ l['plaats'] or '' }}</td>
+  <td>{{ l['land'] or '' }}</td>
+  <td style="white-space:pre-line">{{ l['openingstijden'] or '' }}</td>
+  <td>{% if user['role'] == 'beheerder' %}
+    <form method="post" action="{{ url_for('locatie_delete', lid=l['id']) }}" onsubmit="return confirm('Locatie verwijderen?')">
+      <button class="gevaar">Verwijderen</button>
+    </form>
+  {% endif %}</td>
+</tr>
+{% else %}
+<tr><td colspan="6">Nog geen locaties.</td></tr>
+{% endfor %}
+</table>
+{% endblock %}""",
+ 
+"locatie_form.html": """{% extends "base.html" %}{% block content %}
+<h2>{{ title }}</h2>
+<form method="post" action="{{ action }}" class="card" style="padding:0;overflow:hidden">
+  <table class="form-table">
+  {% for name, label, kind in fields %}
+    <tr>
+      <th>{{ label }}</th>
+      <td>
+      {% if kind == 'textarea' %}
+        <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
+      {% else %}
+        <input type="text" name="{{ name }}" value="{{ c[name] if c[name] is not none else '' }}">
+      {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </table>
+  <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('locaties') }}">Annuleren</a></p>
+</form>
 {% endblock %}""",
  
 "users.html": """{% extends "base.html" %}{% block content %}

@@ -24,7 +24,7 @@ FIELDS = [
     ("pickup_address", "Ophaaladres", "text"),
     ("receiver", "Ontvanger", "text"),
     ("delivery_address", "Afleveradres", "text"),
-    ("carrier", "Vervoerder / chauffeur", "text"),
+    ("carrier_id", "Vervoerder", "carrier"),
     ("vehicle_plate", "Kenteken", "text"),
     ("weight_kg", "Gewicht (kg)", "text"),
     ("colli", "Aantal colli", "text"),
@@ -35,7 +35,23 @@ FIELDS = [
 ]
 TRANSPORT_FIELDS = [name for name, _, _ in FIELDS]
 OPTIONS = {"status": STATUSES, "invoice_status": INVOICE_STATUSES}
-NUMERIC = {"weight_kg": float, "colli": int, "price": float}
+NUMERIC = {"weight_kg": float, "colli": int, "price": float, "carrier_id": int}
+
+# vervoerder-gegevens: naam, label, invoertype
+CARRIER_FIELDS = [
+    ("customer_number", "Klantnummer", "text"),
+    ("name", "Naam", "text"),
+    ("contact_person", "Contactpersoon", "text"),
+    ("address", "Adres", "text"),
+    ("postal_code", "Postcode", "text"),
+    ("city", "Plaats", "text"),
+    ("country", "Land", "text"),
+    ("phone", "Telefoon", "text"),
+    ("email_planning", "E-mail planning", "text"),
+    ("email_accounting", "E-mail boekhouding", "text"),
+    ("notes", "Opmerkingen", "textarea"),
+]
+CARRIER_NAMES = [name for name, _, _ in CARRIER_FIELDS]
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -48,6 +64,20 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('beheerder', 'medewerker'))
 );
+CREATE TABLE IF NOT EXISTS carriers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_number TEXT,
+    name TEXT NOT NULL,
+    contact_person TEXT,
+    address TEXT,
+    postal_code TEXT,
+    city TEXT,
+    country TEXT,
+    phone TEXT,
+    email_planning TEXT,
+    email_accounting TEXT,
+    notes TEXT
+);
 CREATE TABLE IF NOT EXISTS transports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE NOT NULL,
@@ -57,7 +87,7 @@ CREATE TABLE IF NOT EXISTS transports (
     pickup_address TEXT,
     receiver TEXT,
     delivery_address TEXT,
-    carrier TEXT,
+    carrier_id INTEGER REFERENCES carriers(id),
     vehicle_plate TEXT,
     weight_kg REAL,
     colli INTEGER,
@@ -103,7 +133,12 @@ def init_db():
     en de omgevingsvariabele ADMIN_PASSWORD is gezet."""
     db = sqlite3.connect(DB_PATH)
     db.executescript(SCHEMA)
-    count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    # migratie: bestaande databases krijgen de kolom vervoerder-koppeling erbij
+    cols = [r[1] for r in db.execute("PRAGMA table_info(transports)")]
+    if "carrier_id" not in cols:
+        db.execute("ALTER TABLE transports ADD COLUMN carrier_id INTEGER REFERENCES carriers(id)")
+        db.commit()
+    count =db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     admin_pw = os.environ.get("ADMIN_PASSWORD")
     if count == 0 and admin_pw:
         db.execute(
@@ -207,8 +242,9 @@ def update_transport(t, data, user_id):
 
 
 def render_form(t, title, action):
+    carriers = get_db().execute("SELECT id, name FROM carriers ORDER BY name").fetchall()
     return render_template("transport_form.html", t=t, title=title, action=action,
-                           fields=FIELDS, options=OPTIONS)
+                           fields=FIELDS, options=OPTIONS, carriers=carriers)
 
 
 # ---------- routes: inloggen ----------
@@ -245,16 +281,17 @@ def logout():
 def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
-    sql = "SELECT * FROM transports WHERE 1 = 1"
+    sql = ("SELECT t.*, c.name AS carrier_name FROM transports t "
+           "LEFT JOIN carriers c ON c.id = t.carrier_id WHERE 1 = 1")
     params = []
     if q:
-        sql += (" AND (number LIKE ? OR sender LIKE ? OR receiver LIKE ?"
-                " OR carrier LIKE ? OR vehicle_plate LIKE ?)")
+        sql += (" AND (t.number LIKE ? OR t.sender LIKE ? OR t.receiver LIKE ?"
+                " OR c.name LIKE ? OR t.vehicle_plate LIKE ?)")
         params += [f"%{q}%"] * 5
     if status in STATUSES:
-        sql += " AND status = ?"
+        sql += " AND t.status = ?"
         params.append(status)
-    sql += " ORDER BY COALESCE(date, created_at) DESC, id DESC"
+    sql += " ORDER BY COALESCE(t.date, t.created_at) DESC, t.id DESC"
     rows = get_db().execute(sql, params).fetchall()
     return render_template("transports.html", rows=rows, q=q, status=status)
 
@@ -288,7 +325,11 @@ def transport_detail(tid):
         """SELECT h.status, h.changed_at, u.name
            FROM status_history h LEFT JOIN users u ON u.id = h.changed_by
            WHERE h.transport_id = ? ORDER BY h.id DESC""", (tid,)).fetchall()
-    return render_template("transport_detail.html", t=t, history=history, fields=FIELDS)
+    carrier = None
+    if t["carrier_id"]:
+        carrier = db.execute("SELECT * FROM carriers WHERE id = ?", (t["carrier_id"],)).fetchone()
+    return render_template("transport_detail.html", t=t, history=history, fields=FIELDS,
+                           carrier=carrier)
 
 
 @app.route("/transporten/<int:tid>/bewerk", methods=["GET", "POST"])
@@ -338,6 +379,102 @@ def transport_delete(tid):
     db.commit()
     flash("Transport verwijderd.")
     return redirect(url_for("transports"))
+
+
+# ---------- routes: vervoerders ----------
+
+def parse_carrier_form():
+    data = {f: (request.form.get(f, "").strip() or None) for f in CARRIER_NAMES}
+    errors = []
+    if not data["name"]:
+        errors.append("Naam is verplicht.")
+    return data, errors
+
+
+@app.route("/vervoerders")
+@login_required
+def carriers():
+    q = request.args.get("q", "").strip()
+    sql = "SELECT * FROM carriers"
+    params = []
+    if q:
+        sql += " WHERE name LIKE ? OR customer_number LIKE ? OR city LIKE ?"
+        params = [f"%{q}%"] * 3
+    sql += " ORDER BY name"
+    rows = get_db().execute(sql, params).fetchall()
+    return render_template("carriers.html", rows=rows, q=q)
+
+
+@app.route("/vervoerders/nieuw", methods=["GET", "POST"])
+@login_required
+def carrier_new():
+    if request.method == "POST":
+        data, errors = parse_carrier_form()
+        if errors:
+            for e in errors:
+                flash(e)
+            return render_template("carrier_form.html", c=data, title="Nieuwe vervoerder",
+                                   action=url_for("carrier_new"), fields=CARRIER_FIELDS)
+        db = get_db()
+        cols = CARRIER_NAMES
+        cur = db.execute(
+            f"INSERT INTO carriers ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            [data[c] for c in cols])
+        db.commit()
+        flash("Vervoerder aangemaakt.")
+        return redirect(url_for("carrier_detail", cid=cur.lastrowid))
+    return render_template("carrier_form.html", c={f: None for f in CARRIER_NAMES},
+                           title="Nieuwe vervoerder", action=url_for("carrier_new"),
+                           fields=CARRIER_FIELDS)
+
+
+@app.route("/vervoerders/<int:cid>")
+@login_required
+def carrier_detail(cid):
+    db = get_db()
+    c = db.execute("SELECT * FROM carriers WHERE id = ?", (cid,)).fetchone()
+    if c is None:
+        abort(404)
+    used = db.execute(
+        "SELECT id, number, date, status FROM transports WHERE carrier_id = ? ORDER BY id DESC",
+        (cid,)).fetchall()
+    return render_template("carrier_detail.html", c=c, fields=CARRIER_FIELDS, used=used)
+
+
+@app.route("/vervoerders/<int:cid>/bewerk", methods=["GET", "POST"])
+@login_required
+def carrier_edit(cid):
+    db = get_db()
+    c = db.execute("SELECT * FROM carriers WHERE id = ?", (cid,)).fetchone()
+    if c is None:
+        abort(404)
+    action = url_for("carrier_edit", cid=cid)
+    if request.method == "POST":
+        data, errors = parse_carrier_form()
+        if errors:
+            for e in errors:
+                flash(e)
+            return render_template("carrier_form.html", c=data, title=f"Bewerk {c['name']}",
+                                   action=action, fields=CARRIER_FIELDS)
+        sets = ", ".join(f"{f} = ?" for f in CARRIER_NAMES)
+        db.execute(f"UPDATE carriers SET {sets} WHERE id = ?",
+                   [data[f] for f in CARRIER_NAMES] + [cid])
+        db.commit()
+        flash("Vervoerder opgeslagen.")
+        return redirect(url_for("carrier_detail", cid=cid))
+    return render_template("carrier_form.html", c=c, title=f"Bewerk {c['name']}",
+                           action=action, fields=CARRIER_FIELDS)
+
+
+@app.route("/vervoerders/<int:cid>/verwijder", methods=["POST"])
+@admin_required
+def carrier_delete(cid):
+    db = get_db()
+    db.execute("UPDATE transports SET carrier_id = NULL WHERE carrier_id = ?", (cid,))
+    db.execute("DELETE FROM carriers WHERE id = ?", (cid,))
+    db.commit()
+    flash("Vervoerder verwijderd. Gekoppelde transporten hebben nu geen vervoerder.")
+    return redirect(url_for("carriers"))
 
 
 # ---------- routes: gebruikers (alleen beheerder) ----------
@@ -413,6 +550,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <strong>Transportbeheer</strong>
   <nav>
     <a href="{{ url_for('transports') }}">Transporten</a>
+    <a href="{{ url_for('carriers') }}">Vervoerders</a>
     {% if user['role'] == 'beheerder' %}<a href="{{ url_for('users') }}">Gebruikers</a>{% endif %}
     <a href="{{ url_for('logout') }}">Uitloggen ({{ user['name'] }})</a>
   </nav>
@@ -458,7 +596,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <td><span class="badge">{{ t['status'] }}</span></td>
   <td>{{ t['sender'] or '' }}</td>
   <td>{{ t['receiver'] or '' }}</td>
-  <td>{{ t['carrier'] or '' }}</td>
+  <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
@@ -473,7 +611,12 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <div class="grid">
   {% for name, label, kind in fields %}
     <label>{{ label }}
-    {% if kind == 'select' %}
+    {% if kind == 'carrier' %}
+      <select name="{{ name }}">
+        <option value="">— kies een vervoerder —</option>
+        {% for c in carriers %}<option value="{{ c['id'] }}" {% if t[name] == c['id'] %}selected{% endif %}>{{ c['name'] }}</option>{% endfor %}
+      </select>
+    {% elif kind == 'select' %}
       <select name="{{ name }}">
         {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
       </select>
@@ -513,7 +656,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 <div class="card">
 <table>
   {% for name, label, kind in fields %}
+  {% if kind == 'carrier' %}
+  <tr><th style="width:220px">{{ label }}</th><td>{% if carrier %}<a href="{{ url_for('carrier_detail', cid=carrier['id']) }}">{{ carrier['name'] }}</a>{% else %}-{% endif %}</td></tr>
+  {% else %}
   <tr><th style="width:220px">{{ label }}</th><td>{{ t[name] if t[name] is not none else '' }}</td></tr>
+  {% endif %}
   {% endfor %}
 </table>
 </div>
@@ -524,6 +671,79 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <tr><td>{{ h['changed_at'][:16].replace('T', ' ') }}</td><td>{{ h['status'] }}</td><td>{{ h['name'] or '' }}</td></tr>
   {% else %}
   <tr><td>Nog geen geschiedenis.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}""",
+
+"carriers.html": """{% extends "base.html" %}{% block content %}
+<div class="row">
+  <h2>Vervoerders</h2>
+  <a class="btn" href="{{ url_for('carrier_new') }}">+ Nieuwe vervoerder</a>
+</div>
+<form method="get" class="card row">
+  <input name="q" value="{{ q }}" placeholder="Zoek op naam, klantnummer of plaats" style="max-width:360px">
+  <button>Zoeken</button>
+</form>
+<table>
+<tr><th>Klantnummer</th><th>Naam</th><th>Plaats</th><th>Telefoon</th><th>E-mail planning</th></tr>
+{% for c in rows %}
+<tr>
+  <td>{{ c['customer_number'] or '' }}</td>
+  <td><a href="{{ url_for('carrier_detail', cid=c['id']) }}">{{ c['name'] }}</a></td>
+  <td>{{ c['city'] or '' }}</td>
+  <td>{{ c['phone'] or '' }}</td>
+  <td>{{ c['email_planning'] or '' }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5">Nog geen vervoerders.</td></tr>
+{% endfor %}
+</table>
+{% endblock %}""",
+
+"carrier_form.html": """{% extends "base.html" %}{% block content %}
+<h2>{{ title }}</h2>
+<form method="post" action="{{ action }}" class="card">
+  <div class="grid">
+  {% for name, label, kind in fields %}
+    <label>{{ label }}
+    {% if kind == 'textarea' %}
+      <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
+    {% else %}
+      <input type="text" name="{{ name }}" value="{{ c[name] if c[name] is not none else '' }}">
+    {% endif %}
+    </label>
+  {% endfor %}
+  </div>
+  <p><button>Opslaan</button> <a href="{{ url_for('carriers') }}">Annuleren</a></p>
+</form>
+{% endblock %}""",
+
+"carrier_detail.html": """{% extends "base.html" %}{% block content %}
+<div class="row">
+  <h2>{{ c['name'] }}</h2>
+  <div>
+    <a class="btn" href="{{ url_for('carrier_edit', cid=c['id']) }}">Bewerken</a>
+    {% if user['role'] == 'beheerder' %}
+    <form method="post" action="{{ url_for('carrier_delete', cid=c['id']) }}" style="display:inline"
+          onsubmit="return confirm('Vervoerder verwijderen?')">
+      <button class="gevaar">Verwijderen</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+<div class="card">
+<table>
+  {% for name, label, kind in fields %}
+  <tr><th style="width:220px">{{ label }}</th><td>{{ c[name] if c[name] is not none else '' }}</td></tr>
+  {% endfor %}
+</table>
+</div>
+<h3>Transporten met deze vervoerder</h3>
+<table>
+  {% for t in used %}
+  <tr><td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td><td>{{ t['date'] or '' }}</td><td>{{ t['status'] }}</td></tr>
+  {% else %}
+  <tr><td>Nog geen transporten.</td></tr>
   {% endfor %}
 </table>
 {% endblock %}""",

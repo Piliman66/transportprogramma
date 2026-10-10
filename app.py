@@ -676,18 +676,6 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 .form-table th{text-align:left;width:240px;font-weight:600;font-size:13px;background:#f4f5f7;vertical-align:middle}
 .form-table td{padding:4px 8px}
 .form-table td input[type=text],.form-table td input[type=number],.form-table td textarea{max-width:520px}
-.rel-head{display:flex;gap:28px;flex-wrap:wrap;background:#1f3a5f;color:#fff;margin-bottom:0}
-.rel-head small{opacity:.7}
-.rel-layout{display:grid;grid-template-columns:1fr 240px;gap:12px;align-items:start}
-.rel-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.rel-cards .card{margin-bottom:0}
-.kv th{width:45%;font-weight:normal;color:#666;font-size:13px;background:none;border-bottom:1px solid #eee}
-.kv td{border-bottom:1px solid #eee}
-.rel-actions{background:#2c5282;color:#fff;border-radius:6px;padding:16px;position:sticky;top:12px}
-.rel-actions h3{color:#fff}
-.rel-actions .btn{display:block;text-align:center;margin:8px 0;background:#fff;color:#1f3a5f}
-.rel-actions .gevaar{background:#b03a2e;color:#fff}
-@media (max-width:900px){.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
 </style>
 </head>
 <body>
@@ -901,67 +889,36 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 {% endblock %}""",
 
 "relatie_detail.html": """{% extends "base.html" %}{% block content %}
-{% macro card(title, names) %}
-<div class="card">
-  <h3 style="margin-top:0">{{ title }}</h3>
-  <table class="kv">
-  {% for name, label, kind in fields if name in names %}
-    <tr><th>{{ label }}</th>
-        <td style="white-space:pre-line">{% if kind == 'bool' %}{{ 'Ja' if c[name] else 'Nee' }}{% else %}{{ c[name] if c[name] is not none else '–' }}{% endif %}</td></tr>
-  {% endfor %}
-  </table>
-</div>
-{% endmacro %}
-
-<div class="card rel-head">
-  <div><small>Relatiecode</small><br><strong>{{ c['code'] }}</strong></div>
-  <div><small>Naam</small><br><strong>{{ c['name'] }}</strong></div>
-  <div><small>Soort</small><br>{{ SOORTEN[c['soort']][1] }}</div>
-  <div><small>Telefoon</small><br>{{ c['telefoon'] or '–' }}</div>
-  <div><small>E-mail</small><br>{{ c['email'] or '–' }}</div>
-  <div><small>Plaats</small><br>{{ c['post_city'] or '–' }}</div>
-  <div><small>Transporten</small><br>{{ used|length }}</div>
-</div>
-
-<div class="tabs">
-  <a class="active">Relatie details</a>
-  <a href="#transporten">Transporten</a>
-</div>
-
-<div class="rel-layout">
-  <div class="rel-cards">
-    {{ card('Relatie info', ['historisch', 'zoektekst', 'regio', 'taal', 'relatiesoort', 'deelmarkt', 'wagenpark_code', 'contactpersoon', 'contactpersoon_functie', 'contactpersoon_telefoon']) }}
-    {{ card('Contact', ['telefoon', 'fax', 'email', 'email_planning', 'email_boekhouding']) }}
-    {{ card('Postadres en bezoekadres', ['post_address', 'post_postcode', 'post_city', 'post_country', 'visit_address', 'visit_postcode', 'visit_city', 'visit_country']) }}
-    {{ card('Laad- en losadres', ['laadadres', 'losadres']) }}
-    {{ card('Facturatie', ['debiteur_code', 'debiteur_contactpersoon', 'valuta', 'btw_code', 'btw_omschrijving', 'btw_nummer', 'betalingsconditie', 'betalingsconditie_omschrijving', 'aantal_kopiefacturen', 'digitaal_factureren', 'verzamelfactuur', 'geen_efactuur_xml', 'factuur_layout', 'debiteurgroep', 'toeslag_procent']) }}
-    {{ card('Informatie', ['informatie', 'attentie']) }}
-  </div>
-
-  <aside class="rel-actions">
-    <h3 style="margin-top:0">Acties</h3>
+<div class="row">
+  <h2>{{ c['code'] }} – {{ c['name'] }}</h2>
+  <div>
     <a class="btn" href="{{ url_for('relatie_edit', rid=c['id']) }}">Bewerken</a>
-    <a class="btn" href="{{ url_for('transport_new') }}">+ Nieuw transport</a>
-    <a class="btn" href="{{ url_for('relaties', soort=c['soort']) }}">Terug naar lijst</a>
     {% if user['role'] == 'beheerder' %}
-    <form method="post" action="{{ url_for('relatie_delete', rid=c['id']) }}"
+    <form method="post" action="{{ url_for('relatie_delete', rid=c['id']) }}" style="display:inline"
           onsubmit="return confirm('Relatie verwijderen?')">
-      <button class="btn gevaar" style="width:100%">Verwijderen</button>
+      <button class="gevaar">Verwijderen</button>
     </form>
     {% endif %}
-  </aside>
+  </div>
 </div>
-
-<div class="card" id="transporten" style="margin-top:12px">
-  <h3 style="margin-top:0">Transporten</h3>
-  <table>
-    {% for t in used %}
-    <tr><td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td><td>{{ t['date'] or '' }}</td><td>{{ t['status'] }}</td></tr>
-    {% else %}
-    <tr><td>Nog geen transporten.</td></tr>
-    {% endfor %}
-  </table>
+<div class="card">
+<table>
+  <tr><th style="width:260px">Relatiecode</th><td>{{ c['code'] }}</td></tr>
+  <tr><th>Soort</th><td>{{ SOORTEN[c['soort']][1] }}</td></tr>
+  {% for name, label, kind in fields %}
+  <tr><th style="width:260px">{{ label }}</th>
+      <td style="white-space:pre-line">{% if kind == 'bool' %}{{ 'Ja' if c[name] else 'Nee' }}{% else %}{{ c[name] if c[name] is not none else '' }}{% endif %}</td></tr>
+  {% endfor %}
+</table>
 </div>
+<h3>Transporten</h3>
+<table>
+  {% for t in used %}
+  <tr><td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td><td>{{ t['date'] or '' }}</td><td>{{ t['status'] }}</td></tr>
+  {% else %}
+  <tr><td>Nog geen transporten.</td></tr>
+  {% endfor %}
+</table>
 {% endblock %}""",
 
 "users.html": """{% extends "base.html" %}{% block content %}

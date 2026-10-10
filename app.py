@@ -316,13 +316,12 @@ def render_form(t, title, action):
         "rel_vervoerder": db.execute(
             "SELECT id, code, name FROM relaties WHERE soort = 'vervoerder' ORDER BY name").fetchall(),
     }
-    # laad- en losadres per opdrachtgever, voor automatisch invullen in het formulier
-    addr = {str(r["id"]): {"laad": r["laadadres"] or "", "los": r["losadres"] or ""}
-            for r in db.execute(
-                "SELECT id, laadadres, losadres FROM relaties WHERE soort = 'opdrachtgever'")}
+    # gegevens per relatie, voor automatisch invullen van de velden in het formulier
+    rels = {str(r["id"]): {k: (r[k] if r[k] is not None else "") for k in r.keys()}
+            for r in db.execute("SELECT * FROM relaties")}
     return render_template("transport_form.html", t=t, title=title, action=action,
                            fields=TRANSPORT_FIELDS, options=OPTIONS,
-                           relations=relations, addr=addr)
+                           relations=relations, rels=rels)
  
  
 # ---------- routes: inloggen ----------
@@ -687,6 +686,10 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 .rel-actions h3{color:#fff}
 .rel-actions .btn{display:block;text-align:center;margin:8px 0;background:#fff;color:#1f3a5f}
 .rel-actions .gevaar{background:#b03a2e;color:#fff}
+.tf-grid{display:grid;grid-template-columns:170px 1fr 170px 1fr;gap:10px 14px;align-items:center}
+.tf-grid .lbl{font-size:14px;color:#222}
+.tf-grid .span3{grid-column:span 3}
+.tf-grid input[readonly]{background:#eef1f5;color:#444}
 @media (max-width:900px){.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
 </style>
 </head>
@@ -754,40 +757,102 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 "transport_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
 <form method="post" action="{{ action }}" class="card">
-  <div class="grid">
-  {% for name, label, kind in fields %}
-    <label>{{ label }}
-    {% if kind == 'rel_opdrachtgever' or kind == 'rel_vervoerder' %}
-      <select name="{{ name }}">
-        <option value="">— kies —</option>
-        {% for r in relations[kind] %}<option value="{{ r['id'] }}" {% if t[name] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
-      </select>
-    {% elif kind == 'select' %}
-      <select name="{{ name }}">
-        {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
-      </select>
-    {% elif kind == 'textarea' %}
-      <textarea name="{{ name }}" rows="3">{{ t[name] if t[name] is not none else '' }}</textarea>
-    {% else %}
-      <input type="{{ kind }}" name="{{ name }}" value="{{ t[name] if t[name] is not none else '' }}">
-    {% endif %}
-    </label>
-  {% endfor %}
-  </div>
-  <p><button>Opslaan</button> <a href="{{ url_for('transports') }}">Annuleren</a></p>
+<div class="tf-grid">
+  <span class="lbl">Opdrachtnummer</span>
+  <input readonly value="{{ t['number'] or 'wordt automatisch ingevuld' }}">
+  <span class="lbl">Datum</span>
+  <input type="date" name="date" value="{{ t['date'] or '' }}">
+ 
+  <span class="lbl">Debiteur</span>
+  <select name="customer_id">
+    <option value="">— kies een debiteur —</option>
+    {% for r in relations['rel_opdrachtgever'] %}<option value="{{ r['id'] }}" {% if t['customer_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
+  </select>
+  <span class="lbl">Naam debiteur</span>
+  <input id="c_name" readonly>
+ 
+  <span class="lbl">Adres debiteur</span>
+  <input id="c_adres" readonly>
+  <span class="lbl">Postcode / plaats</span>
+  <input id="c_plaats" readonly>
+ 
+  <span class="lbl">Telefoon</span>
+  <input id="c_tel" readonly>
+  <span class="lbl">E-mail relatie</span>
+  <input id="c_email" readonly>
+ 
+  <span class="lbl">Vervoerder</span>
+  <select name="carrier_id">
+    <option value="">— kies een vervoerder —</option>
+    {% for r in relations['rel_vervoerder'] %}<option value="{{ r['id'] }}" {% if t['carrier_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
+  </select>
+  <span class="lbl">Naam vervoerder</span>
+  <input id="v_name" readonly>
+ 
+  <span class="lbl">Kenteken</span>
+  <input name="vehicle_plate" value="{{ t['vehicle_plate'] or '' }}">
+  <span class="lbl">Status</span>
+  <select name="status">
+    {% for o in options['status'] %}<option {% if t['status'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+  </select>
+ 
+  <span class="lbl">Factuurontvangst</span>
+  <select name="invoice_status">
+    <option value="">—</option>
+    {% for o in options['invoice_status'] %}<option {% if t['invoice_status'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+  </select>
+  <span class="lbl">Prijs (€)</span>
+  <input name="price" value="{{ t['price'] if t['price'] is not none else '' }}">
+ 
+  <span class="lbl">Laadadres</span>
+  <textarea class="span3" name="pickup_address" rows="2">{{ t['pickup_address'] or '' }}</textarea>
+ 
+  <span class="lbl">Ontvanger</span>
+  <input name="receiver" value="{{ t['receiver'] or '' }}">
+  <span class="lbl">Losadres</span>
+  <textarea name="delivery_address" rows="2">{{ t['delivery_address'] or '' }}</textarea>
+ 
+  <span class="lbl">Aantal colli</span>
+  <input name="colli" value="{{ t['colli'] if t['colli'] is not none else '' }}">
+  <span class="lbl">Gewicht (kg)</span>
+  <input name="weight_kg" value="{{ t['weight_kg'] if t['weight_kg'] is not none else '' }}">
+ 
+  <span class="lbl">Laadomschrijving</span>
+  <input name="goods_type" value="{{ t['goods_type'] or '' }}">
+  <span class="lbl">Dossierinfo</span>
+  <textarea name="notes" rows="2">{{ t['notes'] or '' }}</textarea>
+</div>
+<p><button>Opslaan</button> <a href="{{ url_for('transports') }}">Annuleren</a></p>
 </form>
 <script>
-  // vul laad- en losadres in vanuit de gekozen opdrachtgever, alleen als die nog leeg zijn
-  const ADDR = {{ addr|tojson }};
-  const sel = document.querySelector('select[name="customer_id"]');
-  if (sel) sel.addEventListener('change', () => {
-    const a = ADDR[sel.value];
-    if (!a) return;
-    const p = document.querySelector('[name="pickup_address"]');
-    const d = document.querySelector('[name="delivery_address"]');
-    if (p && !p.value) p.value = a.laad;
-    if (d && !d.value) d.value = a.los;
-  });
+  // gegevens per relatie; velden met een relatie worden automatisch gevuld
+  const REL = {{ rels|tojson }};
+  const byName = (n) => document.querySelector('[name="' + n + '"]');
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  function showCustomer() {
+    const r = REL[byName('customer_id').value];
+    setVal('c_name', r && r.name);
+    setVal('c_adres', r && r.post_address);
+    setVal('c_plaats', r && ((r.post_postcode || '') + ' ' + (r.post_city || '')).trim());
+    setVal('c_tel', r && r.telefoon);
+    setVal('c_email', r && r.email);
+  }
+  function showCarrier() {
+    const r = REL[byName('carrier_id').value];
+    setVal('v_name', r && r.name);
+  }
+  function fillAddresses() {
+    // laad- en losadres alleen invullen als ze nog leeg zijn
+    const r = REL[byName('customer_id').value];
+    if (!r) return;
+    const p = byName('pickup_address'), d = byName('delivery_address');
+    if (p && !p.value) p.value = r.laadadres || '';
+    if (d && !d.value) d.value = r.losadres || '';
+  }
+  byName('customer_id').addEventListener('change', () => { showCustomer(); fillAddresses(); });
+  byName('carrier_id').addEventListener('change', showCarrier);
+  showCustomer();
+  showCarrier();
 </script>
 {% endblock %}""",
  

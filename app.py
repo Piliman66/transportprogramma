@@ -5,22 +5,22 @@ import secrets
 import sqlite3
 from datetime import datetime
 from functools import wraps
- 
+
 from flask import (Flask, Response, abort, flash, g, redirect, render_template,
                    request, session, url_for)
 from jinja2 import DictLoader
 from werkzeug.security import check_password_hash, generate_password_hash
- 
+
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
- 
+
 STATUSES = ["gepland", "onderweg", "afgeleverd", "geannuleerd"]
 INVOICE_STATUSES = ["niet gefactureerd", "gefactureerd", "betaald"]
 ROLES = ["beheerder", "medewerker"]
- 
+
 # soort -> (prefix van de relatiecode, label)
 SOORTEN = {"vervoerder": ("V", "Vervoerder"), "opdrachtgever": ("D", "Opdrachtgever")}
- 
+
 # Velden van een relatie (vervoerder of opdrachtgever), volgens de foto van het oude systeem.
 # Soort kind: text, textarea, bool (ja/nee) of number.
 RELATION_FIELDS = [
@@ -67,7 +67,7 @@ RELATION_FIELDS = [
     ("attentie", "Attentie", "textarea"),
 ]
 RELATION_NAMES = [n for n, _, _ in RELATION_FIELDS]
- 
+
 # Velden van een transport, in de volgorde van het opdrachtscherm.
 # Kinds 'rel_opdrachtgever' en 'rel_vervoerder' zijn keuzelijsten uit de relaties.
 TRANSPORT_FIELDS = [
@@ -110,7 +110,7 @@ TRANSPORT_FIELDS = [
     ("laadadres_geladen", "Laadadres geladen", "text"),
     ("losadres_gelost", "Losadres gelost", "text"),
     ("losadres_geladen", "Losadres geladen", "text"),
- 
+
     ("bijlage", "Bijlage", "text"),
     ("bijlage_cmr", "Bijlage CMR", "text"),
     ("palletbon_verstuurd_op", "Palletbon verstuurd op", "date"),
@@ -122,14 +122,14 @@ BOOL_NAMES = [n for n, _, k in TRANSPORT_FIELDS if k == "bool"]
 TRANSPORT_NAMES = [n for n, _, _ in TRANSPORT_FIELDS]
 OPTIONS = {"status": STATUSES, "invoice_status": INVOICE_STATUSES}
 NUMERIC = {"weight_kg": float, "colli": int, "price": float}
- 
+
 REL_COLS = ",\n    ".join(
     f"{n} {'INTEGER' if k == 'bool' else 'REAL' if k == 'number' else 'TEXT'}"
     for n, _, k in RELATION_FIELDS)
- 
+
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
- 
+
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,7 +156,8 @@ CREATE TABLE IF NOT EXISTS locaties (
     postcode TEXT,
     plaats TEXT,
     land TEXT,
-    openingstijden TEXT
+    openingstijden TEXT,
+    relatie_id INTEGER REFERENCES relaties(id)
 );
 CREATE TABLE IF NOT EXISTS transports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,27 +188,27 @@ CREATE TABLE IF NOT EXISTS status_history (
     changed_at TEXT NOT NULL
 );
 """
- 
- 
+
+
 def now_str():
     return datetime.now().isoformat(timespec="seconds")
- 
- 
+
+
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
- 
- 
+
+
 @app.teardown_appcontext
 def close_db(exc):
     db = g.pop("db", None)
     if db is not None:
         db.close()
- 
- 
+
+
 def init_db():
     """Maakt tabellen aan. Maakt een beheerder aan als er nog geen gebruikers zijn
     en de omgevingsvariabele ADMIN_PASSWORD is gezet."""
@@ -219,6 +220,10 @@ def init_db():
         if name not in have:
             sqltype = "INTEGER" if kind in ("bool", "rel_locatie") else "TEXT"
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
+    # relatie-koppeling voor locaties in bestaande databases
+    have_loc = {r[1] for r in db.execute("PRAGMA table_info(locaties)")}
+    if "relatie_id" not in have_loc:
+        db.execute("ALTER TABLE locaties ADD COLUMN relatie_id INTEGER REFERENCES relaties(id)")
     db.commit()
     count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     admin_pw = os.environ.get("ADMIN_PASSWORD")
@@ -230,25 +235,25 @@ def init_db():
         )
         db.commit()
     db.close()
- 
- 
+
+
 init_db()
- 
- 
+
+
 # ---------- authenticatie ----------
- 
+
 def current_user():
     uid = session.get("user_id")
     if not uid:
         return None
     return get_db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
- 
- 
+
+
 @app.context_processor
 def inject_globals():
     return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN}
- 
- 
+
+
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -256,8 +261,8 @@ def login_required(f):
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
- 
- 
+
+
 def admin_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -268,10 +273,10 @@ def admin_required(f):
             abort(403)
         return f(*args, **kwargs)
     return wrapper
- 
- 
+
+
 # ---------- relaties ----------
- 
+
 def next_relation_code(soort):
     """Geeft de volgende relatiecode, bv. V00001 of D00001, per soort."""
     db = get_db()
@@ -279,8 +284,8 @@ def next_relation_code(soort):
     db.execute("UPDATE counters SET n = n + 1 WHERE soort = ?", (soort,))
     n = db.execute("SELECT n FROM counters WHERE soort = ?", (soort,)).fetchone()["n"]
     return f"{SOORTEN[soort][0]}{n:05d}"
- 
- 
+
+
 def parse_relation_form():
     data, errors = {}, []
     for name, label, kind in RELATION_FIELDS:
@@ -300,10 +305,10 @@ def parse_relation_form():
     elif not data["zoektekst"]:
         data["zoektekst"] = data["name"].upper()[:30]
     return data, errors
- 
- 
+
+
 # ---------- hulpfuncties transporten ----------
- 
+
 def parse_transport_form():
     data, errors = {}, []
     for name in TRANSPORT_NAMES:
@@ -326,8 +331,8 @@ def parse_transport_form():
     if not data["customer_id"] or not data["receiver"]:
         errors.append("Opdrachtgever en ontvanger zijn verplicht.")
     return data, errors
- 
- 
+
+
 def insert_transport(data, user_id):
     db = get_db()
     now = now_str()
@@ -344,8 +349,8 @@ def insert_transport(data, user_id):
         (tid, data["status"], user_id, now))
     db.commit()
     return tid
- 
- 
+
+
 def update_transport(t, data, user_id):
     db = get_db()
     now = now_str()
@@ -358,8 +363,8 @@ def update_transport(t, data, user_id):
             "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
             (t["id"], data["status"], user_id, now))
     db.commit()
- 
- 
+
+
 def render_form(t, title, action):
     db = get_db()
     relations = {
@@ -378,15 +383,15 @@ def render_form(t, title, action):
                            fields=TRANSPORT_FIELDS, options=OPTIONS,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
                            F={n: (l, k) for n, l, k in TRANSPORT_FIELDS})
- 
- 
+
+
 # ---------- routes: inloggen ----------
- 
+
 @app.route("/")
 def index():
     return redirect(url_for("transports"))
- 
- 
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -399,16 +404,16 @@ def login():
             return redirect(url_for("transports"))
         flash("Ongeldige gebruikersnaam of wachtwoord.")
     return render_template("login.html")
- 
- 
+
+
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
- 
- 
+
+
 # ---------- routes: transporten ----------
- 
+
 @app.route("/transporten")
 @login_required
 def transports():
@@ -428,8 +433,8 @@ def transports():
     sql += " ORDER BY COALESCE(t.date, t.created_at) DESC, t.id DESC"
     rows = get_db().execute(sql, params).fetchall()
     return render_template("transports.html", rows=rows, q=q, status=status)
- 
- 
+
+
 @app.route("/transporten/nieuw", methods=["GET", "POST"])
 @login_required
 def transport_new():
@@ -446,8 +451,8 @@ def transport_new():
     defaults.update(status="gepland", invoice_status="niet gefactureerd",
                     date=datetime.now().strftime("%Y-%m-%d"))
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
- 
- 
+
+
 @app.route("/transporten/<int:tid>")
 @login_required
 def transport_detail(tid):
@@ -470,8 +475,8 @@ def transport_detail(tid):
                 "SELECT id, code, name FROM relaties WHERE id = ?", (t[key],)).fetchone()
     return render_template("transport_detail.html", t=t, history=history,
                            fields=TRANSPORT_FIELDS, related=related)
- 
- 
+
+
 @app.route("/transporten/<int:tid>/bewerk", methods=["GET", "POST"])
 @login_required
 def transport_edit(tid):
@@ -489,8 +494,8 @@ def transport_edit(tid):
         flash("Transport opgeslagen.")
         return redirect(url_for("transport_detail", tid=tid))
     return render_form(t, f"Bewerk {t['number']}", action)
- 
- 
+
+
 @app.route("/transporten/<int:tid>/status", methods=["POST"])
 @login_required
 def transport_status(tid):
@@ -509,8 +514,8 @@ def transport_status(tid):
         db.commit()
         flash(f"Status gewijzigd naar {new}.")
     return redirect(url_for("transport_detail", tid=tid))
- 
- 
+
+
 @app.route("/transporten/<int:tid>/verwijder", methods=["POST"])
 @admin_required
 def transport_delete(tid):
@@ -519,10 +524,10 @@ def transport_delete(tid):
     db.commit()
     flash("Transport verwijderd.")
     return redirect(url_for("transports"))
- 
- 
+
+
 # ---------- routes: relaties (vervoerders en opdrachtgevers) ----------
- 
+
 @app.route("/relaties")
 @login_required
 def relaties():
@@ -540,8 +545,8 @@ def relaties():
     rows = get_db().execute(sql, params).fetchall()
     title = SOORTEN[soort][1] + "s" if soort in SOORTEN else "Relaties"
     return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title)
- 
- 
+
+
 @app.route("/relaties/nieuw/<soort>", methods=["GET", "POST"])
 @login_required
 def relatie_new(soort):
@@ -567,8 +572,8 @@ def relatie_new(soort):
         return redirect(url_for("relatie_detail", rid=cur.lastrowid))
     return render_template("relatie_form.html", c={n: None for n in RELATION_NAMES},
                            title=f"Nieuwe {label.lower()}", action=action, fields=RELATION_FIELDS)
- 
- 
+
+
 @app.route("/relaties/<int:rid>")
 @login_required
 def relatie_detail(rid):
@@ -579,9 +584,12 @@ def relatie_detail(rid):
     used = db.execute(
         "SELECT id, number, date, status FROM transports WHERE customer_id = ? OR carrier_id = ? "
         "ORDER BY id DESC", (rid, rid)).fetchall()
-    return render_template("relatie_detail.html", c=c, fields=RELATION_FIELDS, used=used)
- 
- 
+    locs_rel = db.execute(
+        "SELECT * FROM locaties WHERE relatie_id = ? ORDER BY code", (rid,)).fetchall()
+    return render_template("relatie_detail.html", c=c, fields=RELATION_FIELDS, used=used,
+                           locs_rel=locs_rel)
+
+
 @app.route("/relaties/<int:rid>/bewerk", methods=["GET", "POST"])
 @login_required
 def relatie_edit(rid):
@@ -606,22 +614,23 @@ def relatie_edit(rid):
         return redirect(url_for("relatie_detail", rid=rid))
     return render_template("relatie_form.html", c=c, title=f"Bewerk {c['code']}",
                            action=action, fields=RELATION_FIELDS)
- 
- 
+
+
 @app.route("/relaties/<int:rid>/verwijder", methods=["POST"])
 @admin_required
 def relatie_delete(rid):
     db = get_db()
     db.execute("UPDATE transports SET customer_id = NULL WHERE customer_id = ?", (rid,))
     db.execute("UPDATE transports SET carrier_id = NULL WHERE carrier_id = ?", (rid,))
+    db.execute("UPDATE locaties SET relatie_id = NULL WHERE relatie_id = ?", (rid,))
     db.execute("DELETE FROM relaties WHERE id = ?", (rid,))
     db.commit()
     flash("Relatie verwijderd. Gekoppelde transporten hebben die relatie niet meer.")
     return redirect(url_for("relaties"))
- 
- 
+
+
 # ---------- routes: locaties (laad- en losplaatsen) ----------
- 
+
 LOC_FIELDS = [
     ("naam", "Naam", "text"),
     ("adres", "Adres", "text"),
@@ -629,31 +638,40 @@ LOC_FIELDS = [
     ("plaats", "Plaats", "text"),
     ("land", "Land", "text"),
     ("openingstijden", "Openingstijden", "textarea"),
+    ("relatie_id", "Relatie", "relatie"),
 ]
 LOC_NAMES = [n for n, _, _ in LOC_FIELDS]
- 
- 
+
+
+def relatie_opties():
+    return get_db().execute("SELECT id, code, name FROM relaties ORDER BY name").fetchall()
+
+
 def next_location_code():
     db = get_db()
     db.execute("INSERT INTO counters (soort, n) VALUES ('locatie', 0) ON CONFLICT(soort) DO NOTHING")
     db.execute("UPDATE counters SET n = n + 1 WHERE soort = 'locatie'")
     n = db.execute("SELECT n FROM counters WHERE soort = 'locatie'").fetchone()["n"]
     return f"L{n:05d}"
- 
- 
+
+
 def parse_location_form():
     data = {n: (request.form.get(n, "").strip() or None) for n in LOC_NAMES}
+    rid = data["relatie_id"]
+    data["relatie_id"] = int(rid) if rid and rid.isdigit() else None
     errors = [] if data["naam"] else ["Naam is verplicht."]
     return data, errors
- 
- 
+
+
 @app.route("/locaties")
 @login_required
 def locaties():
-    rows = get_db().execute("SELECT * FROM locaties ORDER BY code").fetchall()
+    rows = get_db().execute(
+        "SELECT l.*, r.code AS rcode, r.name AS rname FROM locaties l "
+        "LEFT JOIN relaties r ON r.id = l.relatie_id ORDER BY l.code").fetchall()
     return render_template("locaties.html", rows=rows)
- 
- 
+
+
 @app.route("/locaties/nieuw", methods=["GET", "POST"])
 @login_required
 def locatie_new():
@@ -663,7 +681,7 @@ def locatie_new():
             for e in errors:
                 flash(e)
             return render_template("locatie_form.html", c=data, title="Nieuwe locatie",
-                                   action=url_for("locatie_new"), fields=LOC_FIELDS)
+                                   action=url_for("locatie_new"), fields=LOC_FIELDS, relaties=relatie_opties())
         db = get_db()
         code = next_location_code()
         db.execute(
@@ -673,10 +691,14 @@ def locatie_new():
         db.commit()
         flash(f"Locatie {code} aangemaakt.")
         return redirect(url_for("locaties"))
-    return render_template("locatie_form.html", c={n: None for n in LOC_NAMES},
-                           title="Nieuwe locatie", action=url_for("locatie_new"), fields=LOC_FIELDS)
- 
- 
+    voor = request.args.get("relatie_id", "")
+    start = {n: None for n in LOC_NAMES}
+    start["relatie_id"] = int(voor) if voor.isdigit() else None
+    return render_template("locatie_form.html", c=start,
+                           title="Nieuwe locatie", action=url_for("locatie_new"), fields=LOC_FIELDS,
+                           relaties=relatie_opties())
+
+
 @app.route("/locaties/<int:lid>/bewerk", methods=["GET", "POST"])
 @login_required
 def locatie_edit(lid):
@@ -691,7 +713,7 @@ def locatie_edit(lid):
             for e in errors:
                 flash(e)
             return render_template("locatie_form.html", c=data, title=f"Bewerk {c['code']}",
-                                   action=action, fields=LOC_FIELDS)
+                                   action=action, fields=LOC_FIELDS, relaties=relatie_opties())
         sets = ", ".join(f"{n} = ?" for n in LOC_NAMES)
         db.execute(f"UPDATE locaties SET {sets} WHERE id = ?",
                    [data[n] for n in LOC_NAMES] + [lid])
@@ -699,9 +721,9 @@ def locatie_edit(lid):
         flash("Locatie opgeslagen.")
         return redirect(url_for("locaties"))
     return render_template("locatie_form.html", c=c, title=f"Bewerk {c['code']}",
-                           action=action, fields=LOC_FIELDS)
- 
- 
+                           action=action, fields=LOC_FIELDS, relaties=relatie_opties())
+
+
 @app.route("/locaties/<int:lid>/verwijder", methods=["POST"])
 @admin_required
 def locatie_delete(lid):
@@ -712,10 +734,10 @@ def locatie_delete(lid):
     db.commit()
     flash("Locatie verwijderd. Gekoppelde transporten hebben die locatie niet meer.")
     return redirect(url_for("locaties"))
- 
- 
+
+
 # ---------- export (alleen beheerder) ----------
- 
+
 def csv_response(filename, headers, rows):
     buf = io.StringIO()
     writer = csv.writer(buf, delimiter=";")  # ; zodat Excel in het Nederlands de kolommen goed splitst
@@ -725,8 +747,8 @@ def csv_response(filename, headers, rows):
         buf.getvalue().encode("utf-8-sig"),
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"})
- 
- 
+
+
 @app.route("/export/transporten.csv")
 @admin_required
 def export_transports():
@@ -742,8 +764,8 @@ def export_transports():
     headers = (["Nummer", "Debiteur code", "Debiteur", "Vervoerder code", "Vervoerder"]
                + [labels[k] for k in keys] + ["Aangemaakt", "Gewijzigd"])
     return csv_response("transporten.csv", headers, [tuple(r) for r in rows])
- 
- 
+
+
 @app.route("/export/relaties.csv")
 @admin_required
 def export_relaties():
@@ -751,10 +773,10 @@ def export_relaties():
         f"SELECT code, soort, {', '.join(RELATION_NAMES)} FROM relaties ORDER BY code").fetchall()
     headers = ["Relatiecode", "Soort"] + [label for _, label, _ in RELATION_FIELDS]
     return csv_response("relaties.csv", headers, [tuple(r) for r in rows])
- 
- 
+
+
 # ---------- routes: gebruikers (alleen beheerder) ----------
- 
+
 @app.route("/gebruikers", methods=["GET", "POST"])
 @admin_required
 def users():
@@ -778,8 +800,8 @@ def users():
         return redirect(url_for("users"))
     rows = db.execute("SELECT id, username, name, role FROM users ORDER BY name").fetchall()
     return render_template("users.html", rows=rows, roles=ROLES)
- 
- 
+
+
 @app.route("/gebruikers/<int:uid>/verwijder", methods=["POST"])
 @admin_required
 def user_delete(uid):
@@ -791,10 +813,10 @@ def user_delete(uid):
         db.commit()
         flash("Gebruiker verwijderd.")
     return redirect(url_for("users"))
- 
- 
+
+
 # ---------- templates (ingebouwd, zodat het project uit één bestand bestaat) ----------
- 
+
 TEMPLATES = {
 "base.html": """<!doctype html>
 <html lang="nl">
@@ -865,7 +887,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 </main>
 </body>
 </html>""",
- 
+
 "login.html": """{% extends "base.html" %}{% block content %}
 <div class="card" style="max-width:360px;margin:40px auto">
 <h2>Inloggen</h2>
@@ -876,7 +898,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 </form>
 </div>
 {% endblock %}""",
- 
+
 "transports.html": """{% extends "base.html" %}{% block content %}
 <div class="row">
   <h2>Transporten</h2>
@@ -907,7 +929,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 {% endfor %}
 </table>
 {% endblock %}""",
- 
+
 "transport_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
 <form method="post" action="{{ action }}" class="card">
@@ -927,15 +949,15 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
            value="{{ t[name] if t[name] is not none else '' }}">
   {% endif %}
 {% endmacro %}
- 
+
 <div class="tf-grid">
   <span class="lbl">Opdrachtnummer</span>
   <input readonly value="{{ t['number'] or 'wordt automatisch ingevuld' }}">
   {{ f('date') }}
- 
+
   {{ f('afdeling') }}
   {{ f('referentie') }}
- 
+
   <span class="lbl">Debiteur</span>
   <select name="customer_id">
     <option value="">— kies een debiteur —</option>
@@ -943,17 +965,17 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   </select>
   <span class="lbl">Naam debiteur</span>
   <input id="c_name" readonly>
- 
+
   <span class="lbl">Adres debiteur</span>
   <input id="c_adres" readonly>
   <span class="lbl">Postcode / plaats</span>
   <input id="c_plaats" readonly>
- 
+
   <span class="lbl">Telefoon</span>
   <input id="c_tel" readonly>
   <span class="lbl">E-mail relatie</span>
   <input id="c_email" readonly>
- 
+
   <span class="lbl">Vervoerder</span>
   <select name="carrier_id">
     <option value="">— kies een vervoerder —</option>
@@ -961,14 +983,14 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   </select>
   <span class="lbl">Naam vervoerder</span>
   <input id="v_name" readonly>
- 
+
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
   {{ f('status') }}
   {{ f('laden_met') }}
   {{ f('invoice_status') }}
   {{ f('price') }}
- 
+
   <div class="tf-sec">Laden</div>
   {{ f('laad_datum') }}
   {{ f('laad_tijd_van') }}
@@ -1002,7 +1024,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('ldm') }}
   {{ f('laad_regel_2', True) }}
   {{ f('laad_regel_3', True) }}
- 
+
   <div class="tf-sec">Lossen</div>
   {{ f('los_datum') }}
   {{ f('los_tijd_van') }}
@@ -1029,7 +1051,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('bijz_lossen_code') }}
   {{ f('bijz_lossen_1') }}
   {{ f('bijz_lossen_2', True) }}
- 
+
   <div class="tf-sec">Overig</div>
   {{ f('europalletten') }}
   {{ f('afgehandeld') }}
@@ -1083,10 +1105,10 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   showLoc('los_locatie_id', 'lo_');
 </script>
 {% endblock %}""",
- 
+
 "transport_detail.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ t['number'] }} <span class="badge">{{ t['status'] }}</span></h2>
- 
+
 <div class="card row">
   <form method="post" action="{{ url_for('transport_status', tid=t['id']) }}" class="row">
     <select name="status" style="width:auto">
@@ -1104,7 +1126,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     {% endif %}
   </div>
 </div>
- 
+
 <div class="card">
 <table>
   {% for name, label, kind in fields %}
@@ -1117,7 +1139,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {% endfor %}
 </table>
 </div>
- 
+
 <h3>Statusgeschiedenis</h3>
 <table>
   {% for h in history %}
@@ -1127,7 +1149,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {% endfor %}
 </table>
 {% endblock %}""",
- 
+
 "relaties.html": """{% extends "base.html" %}{% block content %}
 <div class="tabs">
   <a href="{{ url_for('relaties') }}" class="{{ 'active' if not soort else '' }}">Alle relaties</a>
@@ -1165,7 +1187,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 {% endfor %}
 </table>
 {% endblock %}""",
- 
+
 "relatie_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
 <form method="post" action="{{ action }}" class="card" style="padding:0;overflow:hidden">
@@ -1192,7 +1214,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('relaties') }}">Annuleren</a></p>
 </form>
 {% endblock %}""",
- 
+
 "relatie_detail.html": """{% extends "base.html" %}{% block content %}
 {% macro card(title, names) %}
 <div class="card">
@@ -1205,7 +1227,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   </table>
 </div>
 {% endmacro %}
- 
+
 <div class="card rel-head">
   <div><small>Relatiecode</small><br><strong>{{ c['code'] }}</strong></div>
   <div><small>Naam</small><br><strong>{{ c['name'] }}</strong></div>
@@ -1215,12 +1237,12 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <div><small>Plaats</small><br>{{ c['post_city'] or '–' }}</div>
   <div><small>Transporten</small><br>{{ used|length }}</div>
 </div>
- 
+
 <div class="tabs">
   <a class="active">Relatie details</a>
   <a href="#transporten">Transporten</a>
 </div>
- 
+
 <div class="rel-layout">
   <div class="rel-cards">
     {{ card('Relatie info', ['historisch', 'zoektekst', 'regio', 'taal', 'relatiesoort', 'deelmarkt', 'wagenpark_code', 'contactpersoon', 'contactpersoon_functie', 'contactpersoon_telefoon']) }}
@@ -1228,8 +1250,19 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     {{ card('Postadres en bezoekadres', ['post_address', 'post_postcode', 'post_city', 'post_country', 'visit_address', 'visit_postcode', 'visit_city', 'visit_country']) }}
     {{ card('Facturatie', ['debiteur_code', 'debiteur_contactpersoon', 'valuta', 'btw_code', 'btw_omschrijving', 'btw_nummer', 'betalingsconditie', 'betalingsconditie_omschrijving', 'aantal_kopiefacturen', 'digitaal_factureren', 'verzamelfactuur', 'geen_efactuur_xml', 'factuur_layout', 'debiteurgroep', 'toeslag_procent']) }}
     {{ card('Informatie', ['informatie', 'attentie']) }}
+    <div class="card">
+      <h3 style="margin-top:0">Locaties (laad- en losplaatsen)</h3>
+      <table class="kv">
+      {% for l in locs_rel %}
+        <tr><th>{{ l['code'] }}</th><td>{{ l['naam'] }}{% if l['plaats'] %}, {{ l['plaats'] }}{% endif %}</td></tr>
+      {% else %}
+        <tr><td colspan="2">Nog geen locaties voor deze relatie.</td></tr>
+      {% endfor %}
+      </table>
+      <p><a class="btn" href="{{ url_for('locatie_new', relatie_id=c['id']) }}">+ Nieuwe locatie voor deze relatie</a></p>
+    </div>
   </div>
- 
+
   <aside class="rel-actions">
     <h3 style="margin-top:0">Acties</h3>
     <a class="btn" href="{{ url_for('relatie_edit', rid=c['id']) }}">Bewerken</a>
@@ -1243,7 +1276,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     {% endif %}
   </aside>
 </div>
- 
+
 <div class="card" id="transporten" style="margin-top:12px">
   <h3 style="margin-top:0">Transporten</h3>
   <table>
@@ -1255,18 +1288,19 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   </table>
 </div>
 {% endblock %}""",
- 
+
 "locaties.html": """{% extends "base.html" %}{% block content %}
 <div class="row">
   <h2>Locaties (laad- en losplaatsen)</h2>
   <a class="btn" href="{{ url_for('locatie_new') }}">+ Nieuwe locatie</a>
 </div>
 <table>
-<tr><th>Code</th><th>Naam</th><th>Plaats</th><th>Land</th><th>Openingstijden</th><th></th></tr>
+<tr><th>Code</th><th>Naam</th><th>Relatie</th><th>Plaats</th><th>Land</th><th>Openingstijden</th><th></th></tr>
 {% for l in rows %}
 <tr>
   <td>{{ l['code'] }}</td>
   <td><a href="{{ url_for('locatie_edit', lid=l['id']) }}">{{ l['naam'] }}</a></td>
+  <td>{% if l['rcode'] %}<a href="{{ url_for('relatie_detail', rid=l['relatie_id']) }}">{{ l['rcode'] }} – {{ l['rname'] }}</a>{% else %}–{% endif %}</td>
   <td>{{ l['plaats'] or '' }}</td>
   <td>{{ l['land'] or '' }}</td>
   <td style="white-space:pre-line">{{ l['openingstijden'] or '' }}</td>
@@ -1277,11 +1311,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {% endif %}</td>
 </tr>
 {% else %}
-<tr><td colspan="6">Nog geen locaties.</td></tr>
+<tr><td colspan="7">Nog geen locaties.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}""",
- 
+
 "locatie_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
 <form method="post" action="{{ action }}" class="card" style="padding:0;overflow:hidden">
@@ -1292,6 +1326,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
       <td>
       {% if kind == 'textarea' %}
         <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
+      {% elif kind == 'relatie' %}
+        <select name="{{ name }}">
+          <option value="">– geen –</option>
+          {% for r in relaties %}<option value="{{ r['id'] }}" {% if c[name] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
+        </select>
       {% else %}
         <input type="text" name="{{ name }}" value="{{ c[name] if c[name] is not none else '' }}">
       {% endif %}
@@ -1302,7 +1341,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('locaties') }}">Annuleren</a></p>
 </form>
 {% endblock %}""",
- 
+
 "users.html": """{% extends "base.html" %}{% block content %}
 <h2>Gebruikers</h2>
 <p>Back-up exporteren (CSV, opent in Excel):
@@ -1321,7 +1360,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 </tr>
 {% endfor %}
 </table>
- 
+
 <div class="card" style="margin-top:20px;max-width:420px">
 <h3>Nieuwe gebruiker</h3>
 <form method="post">
@@ -1334,8 +1373,8 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 </div>
 {% endblock %}"""
 }
- 
+
 app.jinja_loader = DictLoader(TEMPLATES)
- 
+
 if __name__ == "__main__":
     app.run(debug=False, port=int(os.environ.get("PORT", 5000)))

@@ -882,6 +882,10 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 .tf-grid input[readonly]{background:#eef1f5;color:#444}
 .tf-sec{grid-column:1/-1;font-weight:600;background:#f4f5f7;padding:6px 8px;border-radius:4px;margin-top:8px}
 .chk{display:flex;align-items:center;gap:6px;font-size:14px}
+.lad-tbl{display:grid;grid-template-columns:2fr 90px 110px 2fr 110px 80px;gap:6px;grid-column:1/-1;align-items:center}
+.lad-tbl .lbl{font-size:13px}
+.lad-tbl input{width:100%}
+@media (max-width:700px){.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-tbl{grid-template-columns:1fr 1fr}}
 @media (max-width:900px){.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
 </style>
 </head>
@@ -950,8 +954,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 "transport_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
 <form method="post" action="{{ action }}" class="card">
-{% macro f(name, span=False) %}
-  <span class="lbl">{{ F[name][0] }}</span>
+{% macro ctl(name, span=False) %}
   {% if F[name][1] == 'textarea' %}
     <textarea name="{{ name }}" rows="2" class="{{ 'span3' if span }}">{{ t[name] or '' }}</textarea>
   {% elif F[name][1] == 'bool' %}
@@ -972,6 +975,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
            value="{{ v }}">
   {% endif %}
 {% endmacro %}
+{% macro f(name, span=False) %}<span class="lbl">{{ F[name][0] }}</span>{{ ctl(name, span) }}{% endmacro %}
 
 <div class="tf-grid">
   <span class="lbl">Opdrachtnummer</span>
@@ -1014,6 +1018,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
+
   {{ f('status') }}
   <span class="lbl">Tijdstip</span>
   <div>
@@ -1023,9 +1028,13 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     </select>
     <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
   </div>
-  {{ f('laden_met') }}
+
   {{ f('invoice_status') }}
   {{ f('price') }}
+
+  {{ f('laden_met') }}
+  <span></span><span></span>
+  {{ f('notes', True) }}
 
   <div class="tf-sec">Laden</div>
   {{ f('laad_datum') }}
@@ -1048,18 +1057,17 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <input id="l_plaats" readonly>
   <span class="lbl">Land</span>
   <input id="l_land" readonly>
-  <span class="lbl"></span><span></span>
-  {{ f('bijz_laden_code') }}
-  {{ f('bijz_laden_1') }}
-  {{ f('bijz_laden_2', True) }}
-  {{ f('laad_ref') }}
-  {{ f('colli') }}
-  {{ f('laad_eenheid') }}
-  {{ f('goods_type') }}
-  {{ f('weight_kg') }}
-  {{ f('ldm') }}
-  {{ f('laad_regel_2', True) }}
-  {{ f('laad_regel_3', True) }}
+
+  <span class="lbl">Bijzonderheden laden</span>{{ ctl('bijz_laden_code') }}
+  <span class="lbl"></span>{{ ctl('bijz_laden_1') }}
+  <span class="lbl"></span>{{ ctl('bijz_laden_2', True) }}
+
+  <div class="lad-tbl">
+    <span class="lbl">Laadnummer</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
+    {{ ctl('laad_ref') }}{{ ctl('colli') }}{{ ctl('laad_eenheid') }}{{ ctl('goods_type') }}{{ ctl('weight_kg') }}{{ ctl('ldm') }}
+    {{ ctl('laad_regel_2') }}<span></span><span></span><span></span><span></span><span></span>
+    {{ ctl('laad_regel_3') }}<span></span><span></span><span></span><span></span><span></span>
+  </div>
 
   <div class="tf-sec">Lossen</div>
   {{ f('los_datum') }}
@@ -1082,11 +1090,12 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <input id="lo_plaats" readonly>
   <span class="lbl">Land</span>
   <input id="lo_land" readonly>
-  <span class="lbl"></span><span></span>
+
   {{ f('receiver') }}
-  {{ f('bijz_lossen_code') }}
-  {{ f('bijz_lossen_1') }}
-  {{ f('bijz_lossen_2', True) }}
+  <span></span><span></span>
+  <span class="lbl">Bijzonderheden lossen</span>{{ ctl('bijz_lossen_code') }}
+  <span class="lbl"></span>{{ ctl('bijz_lossen_1') }}
+  <span class="lbl"></span>{{ ctl('bijz_lossen_2', True) }}
 
   <div class="tf-sec">Overig</div>
   {{ f('europalletten') }}
@@ -1099,7 +1108,6 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('bijlage_cmr') }}
   {{ f('palletbon_verstuurd_op') }}
   {{ f('digitaal_factureren') }}
-  {{ f('notes', True) }}
 </div>
 <p><button>Opslaan</button> <a href="{{ url_for('transports') }}">Annuleren</a></p>
 </form>

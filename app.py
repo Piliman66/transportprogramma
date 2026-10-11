@@ -4,6 +4,7 @@ import os
 import secrets
 import sqlite3
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from functools import wraps
 
 from flask import (Flask, Response, abort, flash, g, redirect, render_template,
@@ -14,7 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
 
-STATUSES = ["gepland", "onderweg", "afgeleverd", "geannuleerd"]
+STATUSES = ["gepland", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
 INVOICE_STATUSES = ["niet gefactureerd", "gefactureerd", "betaald"]
 ROLES = ["beheerder", "medewerker"]
 
@@ -66,8 +67,9 @@ RELATION_NAMES = [n for n, _, _ in RELATION_FIELDS]
 # Velden van een transport, in de volgorde van het opdrachtscherm.
 # Kinds 'rel_opdrachtgever' en 'rel_vervoerder' zijn keuzelijsten uit de relaties.
 TRANSPORT_FIELDS = [
-    ("date", "Invoerdatum", "date"),
+    ("date", "Invoerdatum", "datetime"),
     ("status", "Status", "select"),
+    ("status_tijd", "Tijdstip", "time"),
     ("customer_id", "Debiteur", "rel_opdrachtgever"),
     ("carrier_id", "Vervoerder", "rel_vervoerder"),
     ("afdeling", "Afdeling", "text"),
@@ -232,6 +234,8 @@ def init_db():
         if name not in have:
             sqltype = "INTEGER" if kind in ("bool", "rel_locatie") else "TEXT"
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
+    # oude status 'onderweg' is nu 'onderweg laden'
+    db.execute("UPDATE transports SET status = 'onderweg laden' WHERE status = 'onderweg'")
     # nieuwe locatievelden toevoegen aan bestaande databases
     have_loc = {r[1] for r in db.execute("PRAGMA table_info(locaties)")}
     for name, _, kind in LOC_FIELDS:
@@ -332,6 +336,8 @@ def parse_transport_form():
             data[name] = 1 if request.form.get(name) else 0
             continue
         raw = request.form.get(name, "").strip()
+        if name == "date":
+            raw = raw.replace("T", " ")  # datetime-local geeft 'YYYY-MM-DDTHH:MM'
         if name in NUMERIC:
             try:
                 data[name] = NUMERIC[name](raw.replace(",", ".")) if raw else None
@@ -464,8 +470,8 @@ def transport_new():
         flash("Transport aangemaakt.")
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
-    defaults.update(status="gepland", invoice_status="niet gefactureerd",
-                    date=datetime.now().strftime("%Y-%m-%d"))
+    defaults.update(status="gepland", status_tijd="00:00", invoice_status="niet gefactureerd",
+                    date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"))
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
 
 
@@ -952,8 +958,14 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
       {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
     </select>
   {% else %}
-    <input type="{{ 'date' if F[name][1] == 'date' else 'text' }}" name="{{ name }}" class="{{ 'span3' if span }}"
-           value="{{ t[name] if t[name] is not none else '' }}">
+    {% if F[name][1] == 'datetime' %}
+      {% set v = (t[name] or '')|replace(' ', 'T') %}
+      {% if v|length == 10 %}{% set v = v ~ 'T00:00' %}{% endif %}
+    {% else %}
+      {% set v = t[name] if t[name] is not none else '' %}
+    {% endif %}
+    <input type="{{ 'datetime-local' if F[name][1] == 'datetime' else ('date' if F[name][1] == 'date' else ('time' if F[name][1] == 'time' else 'text')) }}" name="{{ name }}" class="{{ 'span3' if span }}"
+           value="{{ v }}">
   {% endif %}
 {% endmacro %}
 
@@ -999,6 +1011,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
   {{ f('status') }}
+  {{ f('status_tijd') }}
   {{ f('laden_met') }}
   {{ f('invoice_status') }}
   {{ f('price') }}

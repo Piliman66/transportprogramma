@@ -16,6 +16,9 @@ DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
 
 STATUSES = ["gepland", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
+# tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
+TIJD_OPTIES = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in (0, 15, 30, 45)
+               if h * 60 + m <= 21 * 60]
 INVOICE_STATUSES = ["niet gefactureerd", "gefactureerd", "betaald"]
 ROLES = ["beheerder", "medewerker"]
 
@@ -271,7 +274,8 @@ def current_user():
 
 @app.context_processor
 def inject_globals():
-    return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN}
+    return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN,
+            "TIJD_OPTIES": TIJD_OPTIES}
 
 
 def login_required(f):
@@ -470,7 +474,7 @@ def transport_new():
         flash("Transport aangemaakt.")
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
-    defaults.update(status="gepland", status_tijd="00:00", invoice_status="niet gefactureerd",
+    defaults.update(status="gepland", invoice_status="niet gefactureerd",
                     date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"))
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
 
@@ -1013,7 +1017,10 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('status') }}
   <span class="lbl">Tijdstip</span>
   <div>
-    <input type="time" name="status_tijd" id="status_tijd" value="{{ t['status_tijd'] or '00:00' }}">
+    <select name="status_tijd" id="status_tijd">
+      <option value="">—</option>
+      {% for tj in TIJD_OPTIES %}<option value="{{ tj }}" {% if t['status_tijd'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
     <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
   </div>
   {{ f('laden_met') }}
@@ -1132,7 +1139,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     inp.disabled = !on;  // uitgeschakelde velden worden niet opgeslagen
     document.getElementById('status_tijd_dash').style.display = on ? 'none' : '';
   }
-  byName('status').addEventListener('change', syncTijd);
+  // bij een andere status wordt het tijdstip leeggemaakt, zodat het opnieuw ingevuld moet worden
+  byName('status').addEventListener('change', () => {
+    document.getElementById('status_tijd').value = '';
+    syncTijd();
+  });
   syncTijd();
   byName('customer_id').addEventListener('change', showCustomer);
   byName('carrier_id').addEventListener('change', showCarrier);

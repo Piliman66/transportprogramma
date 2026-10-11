@@ -1011,7 +1011,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
   {{ f('status') }}
-  {{ f('status_tijd') }}
+  <span class="lbl">Tijdstip</span>
+  <div>
+    <input type="time" name="status_tijd" id="status_tijd" value="{{ t['status_tijd'] or '00:00' }}">
+    <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
+  </div>
   {{ f('laden_met') }}
   {{ f('invoice_status') }}
   {{ f('price') }}
@@ -1120,6 +1124,16 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     setVal(p + 'land', l && l.land);
     setVal(p + 'openingstijden', l && l.openingstijden);
   }
+  // tijdstip alleen bij onderweg laden/lossen; bij andere status een "–"
+  function syncTijd() {
+    const on = ['onderweg laden', 'onderweg lossen'].includes(byName('status').value);
+    const inp = document.getElementById('status_tijd');
+    inp.style.display = on ? '' : 'none';
+    inp.disabled = !on;  // uitgeschakelde velden worden niet opgeslagen
+    document.getElementById('status_tijd_dash').style.display = on ? 'none' : '';
+  }
+  byName('status').addEventListener('change', syncTijd);
+  syncTijd();
   byName('customer_id').addEventListener('change', showCustomer);
   byName('carrier_id').addEventListener('change', showCarrier);
   byName('laad_locatie_id').addEventListener('change', () => showLoc('laad_locatie_id', 'l_'));

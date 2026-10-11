@@ -973,15 +973,20 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <span class="lbl">Naam debiteur</span>
   <input id="c_name" readonly>
 
-  <span class="lbl">Adres debiteur</span>
-  <input id="c_adres" readonly>
-  <span class="lbl">Postcode / plaats</span>
-  <input id="c_plaats" readonly>
+  <details style="grid-column:1 / -1">
+    <summary style="cursor:pointer;padding:8px 0"><strong>Details</strong> (adres en contact debiteur)</summary>
+    <div class="tf-grid" style="margin-top:8px">
+      <span class="lbl">Adres debiteur</span>
+      <input id="c_adres" readonly>
+      <span class="lbl">Postcode / plaats</span>
+      <input id="c_plaats" readonly>
 
-  <span class="lbl">Telefoon</span>
-  <input id="c_tel" readonly>
-  <span class="lbl">E-mail relatie</span>
-  <input id="c_email" readonly>
+      <span class="lbl">Telefoon</span>
+      <input id="c_tel" readonly>
+      <span class="lbl">E-mail relatie</span>
+      <input id="c_email" readonly>
+    </div>
+  </details>
 
   <span class="lbl">Vervoerder</span>
   <select name="carrier_id">

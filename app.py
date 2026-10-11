@@ -27,11 +27,6 @@ RELATION_FIELDS = [
     ("historisch", "Historisch", "bool"),
     ("zoektekst", "Zoektekst", "text"),
     ("name", "Naam", "text"),
-    ("post_address", "Postadres", "text"),
-    ("post_postcode", "Postadres postcode", "text"),
-    ("post_city", "Postadres plaats", "text"),
-    ("post_country", "Postadres land", "text"),
-    ("visit_address", "Bezoekadres", "text"),
     ("visit_postcode", "Bezoekadres postcode", "text"),
     ("visit_city", "Bezoekadres plaats", "text"),
     ("visit_country", "Bezoekadres land", "text"),
@@ -157,6 +152,9 @@ CREATE TABLE IF NOT EXISTS locaties (
     plaats TEXT,
     land TEXT,
     openingstijden TEXT,
+    telefoon TEXT,
+    contactpersoon TEXT,
+    bijzonderheden_laden TEXT,
     relatie_id INTEGER REFERENCES relaties(id)
 );
 CREATE TABLE IF NOT EXISTS transports (
@@ -209,6 +207,20 @@ def close_db(exc):
         db.close()
 
 
+LOC_FIELDS = [
+    ("naam", "Naam", "text"),
+    ("adres", "Adres", "text"),
+    ("postcode", "Postcode", "text"),
+    ("plaats", "Plaats", "text"),
+    ("land", "Land", "text"),
+    ("openingstijden", "Openingstijden", "textarea"),
+    ("telefoon", "Telefoonnummer", "text"),
+    ("contactpersoon", "Contactpersoon", "text"),
+    ("bijzonderheden_laden", "Bijzonderheden laden", "textarea"),
+    ("relatie_id", "Relatie", "relatie"),
+]
+
+
 def init_db():
     """Maakt tabellen aan. Maakt een beheerder aan als er nog geen gebruikers zijn
     en de omgevingsvariabele ADMIN_PASSWORD is gezet."""
@@ -220,10 +232,14 @@ def init_db():
         if name not in have:
             sqltype = "INTEGER" if kind in ("bool", "rel_locatie") else "TEXT"
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
-    # relatie-koppeling voor locaties in bestaande databases
+    # nieuwe locatievelden toevoegen aan bestaande databases
     have_loc = {r[1] for r in db.execute("PRAGMA table_info(locaties)")}
-    if "relatie_id" not in have_loc:
-        db.execute("ALTER TABLE locaties ADD COLUMN relatie_id INTEGER REFERENCES relaties(id)")
+    for name, _, kind in LOC_FIELDS:
+        if name not in have_loc:
+            if kind == "relatie":
+                db.execute("ALTER TABLE locaties ADD COLUMN relatie_id INTEGER REFERENCES relaties(id)")
+            else:
+                db.execute(f"ALTER TABLE locaties ADD COLUMN {name} TEXT")
     db.commit()
     count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     admin_pw = os.environ.get("ADMIN_PASSWORD")
@@ -539,7 +555,7 @@ def relaties():
         sql += " AND soort = ?"
         params.append(soort)
     if q:
-        sql += " AND (code LIKE ? OR name LIKE ? OR post_city LIKE ? OR zoektekst LIKE ?)"
+        sql += " AND (code LIKE ? OR name LIKE ? OR visit_city LIKE ? OR zoektekst LIKE ?)"
         params += [f"%{q}%"] * 4
     sql += " ORDER BY name"
     rows = get_db().execute(sql, params).fetchall()
@@ -631,15 +647,6 @@ def relatie_delete(rid):
 
 # ---------- routes: locaties (laad- en losplaatsen) ----------
 
-LOC_FIELDS = [
-    ("naam", "Naam", "text"),
-    ("adres", "Adres", "text"),
-    ("postcode", "Postcode", "text"),
-    ("plaats", "Plaats", "text"),
-    ("land", "Land", "text"),
-    ("openingstijden", "Openingstijden", "textarea"),
-    ("relatie_id", "Relatie", "relatie"),
-]
 LOC_NAMES = [n for n, _, _ in LOC_FIELDS]
 
 
@@ -1075,8 +1082,8 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   function showCustomer() {
     const r = REL[byName('customer_id').value];
     setVal('c_name', r && r.name);
-    setVal('c_adres', r && r.post_address);
-    setVal('c_plaats', r && ((r.post_postcode || '') + ' ' + (r.post_city || '')).trim());
+    setVal('c_adres', '');
+    setVal('c_plaats', r && ((r.visit_postcode || '') + ' ' + (r.visit_city || '')).trim());
     setVal('c_tel', r && r.telefoon);
     setVal('c_email', r && r.email);
   }
@@ -1178,7 +1185,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 <tr>
   <td>{{ c['code'] }}</td>
   <td><a href="{{ url_for('relatie_detail', rid=c['id']) }}">{{ c['name'] }}</a></td>
-  <td>{{ c['post_city'] or '' }}</td>
+  <td>{{ c['visit_city'] or '' }}</td>
   <td>{{ c['telefoon'] or '' }}</td>
   <td>{{ c['email_planning'] or '' }}</td>
 </tr>
@@ -1234,7 +1241,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <div><small>Soort</small><br>{{ SOORTEN[c['soort']][1] }}</div>
   <div><small>Telefoon</small><br>{{ c['telefoon'] or '–' }}</div>
   <div><small>E-mail</small><br>{{ c['email'] or '–' }}</div>
-  <div><small>Plaats</small><br>{{ c['post_city'] or '–' }}</div>
+  <div><small>Plaats</small><br>{{ c['visit_city'] or '–' }}</div>
   <div><small>Transporten</small><br>{{ used|length }}</div>
 </div>
 
@@ -1247,7 +1254,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <div class="rel-cards">
     {{ card('Relatie info', ['historisch', 'zoektekst', 'regio', 'taal', 'relatiesoort', 'deelmarkt', 'wagenpark_code', 'contactpersoon', 'contactpersoon_functie', 'contactpersoon_telefoon']) }}
     {{ card('Contact', ['telefoon', 'fax', 'email', 'email_planning', 'email_boekhouding']) }}
-    {{ card('Postadres en bezoekadres', ['post_address', 'post_postcode', 'post_city', 'post_country', 'visit_address', 'visit_postcode', 'visit_city', 'visit_country']) }}
+    {{ card('Bezoekadres', ['visit_postcode', 'visit_city', 'visit_country']) }}
     {{ card('Facturatie', ['debiteur_code', 'debiteur_contactpersoon', 'valuta', 'btw_code', 'btw_omschrijving', 'btw_nummer', 'betalingsconditie', 'betalingsconditie_omschrijving', 'aantal_kopiefacturen', 'digitaal_factureren', 'verzamelfactuur', 'geen_efactuur_xml', 'factuur_layout', 'debiteurgroep', 'toeslag_procent']) }}
     {{ card('Informatie', ['informatie', 'attentie']) }}
     <div class="card">

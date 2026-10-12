@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.19 - 12-10-2026 17:00"
+APP_VERSIE = "1.20 - 12-10-2026 18:05"
 
 
 @app.after_request
@@ -830,10 +830,20 @@ def relaties():
     if q:
         sql += " AND (code LIKE ? OR name LIKE ? OR visit_city LIKE ? OR zoektekst LIKE ?)"
         params += [f"%{q}%"] * 4
+    # filters per kolom
+    filters = {"f_naam": "name", "f_btw": "btw_nummer", "f_plaats": "visit_city"}
+    filterwaarden = {}
+    for arg, kolom in filters.items():
+        waarde = request.args.get(arg, "").strip()
+        filterwaarden[arg] = waarde
+        if waarde:
+            sql += f" AND {kolom} LIKE ?"
+            params.append(f"%{waarde}%")
     sql += " ORDER BY name"
     rows = get_db().execute(sql, params).fetchall()
     title = SOORTEN[soort][1] + "s" if soort in SOORTEN else "Relaties"
-    return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title)
+    return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title,
+                           **filterwaarden)
 
 
 @app.route("/relaties/nieuw/<soort>", methods=["GET", "POST"])
@@ -1875,20 +1885,33 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <input name="q" value="{{ q }}" placeholder="Zoek op code, naam of plaats" style="max-width:360px">
   <button>Zoeken</button>
 </form>
+<form method="get">
+<input type="hidden" name="soort" value="{{ soort }}">
+<input type="hidden" name="q" value="{{ q }}">
 <table>
-<tr><th>Code</th><th>Naam</th><th>Plaats</th><th>Telefoon</th><th>E-mail planning</th></tr>
+<tr><th>Code</th><th>Naam</th><th>BTW nummer</th><th>Plaats</th><th>Telefoon</th><th>E-mail planning</th></tr>
+<tr class="filterrij">
+  <td></td>
+  <td><input name="f_naam" value="{{ f_naam }}" placeholder="Filter naam"></td>
+  <td><input name="f_btw" value="{{ f_btw }}" placeholder="Filter BTW nummer"></td>
+  <td><input name="f_plaats" value="{{ f_plaats }}" placeholder="Filter plaats"></td>
+  <td></td>
+  <td><button>Filter</button> <a href="{{ url_for('relaties', soort=soort) }}">Wis</a></td>
+</tr>
 {% for c in rows %}
 <tr>
   <td>{{ c['code'] }}</td>
   <td><a href="{{ url_for('relatie_detail', rid=c['id']) }}">{{ c['name'] }}</a></td>
+  <td>{{ c['btw_nummer'] or '' }}</td>
   <td>{{ c['visit_city'] or '' }}</td>
   <td>{{ c['telefoon'] or '' }}</td>
   <td>{{ c['email_planning'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="5">Nog niets gevonden.</td></tr>
+<tr><td colspan="6">Nog niets gevonden.</td></tr>
 {% endfor %}
 </table>
+</form>
 {% endblock %}""",
 
 "relaties_import.html": """{% extends "base.html" %}{% block content %}

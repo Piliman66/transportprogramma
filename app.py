@@ -15,7 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
 
-STATUSES = ["gepland", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
+STATUSES = ["gepland", "in het veld", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
 # tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
 TIJD_OPTIES = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in (0, 15, 30, 45)
                if h * 60 + m <= 21 * 60]
@@ -509,7 +509,7 @@ def transport_new():
         flash("Transport aangemaakt.")
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
-    defaults.update(status="gepland", invoice_status="niet gefactureerd",
+    defaults.update(status="in het veld", invoice_status="niet gefactureerd",
                     date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"),
                     number=preview_transport_number())
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))

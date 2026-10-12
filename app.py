@@ -317,8 +317,8 @@ def inject_globals():
             "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES}
 
 
-# versienummer: bij elke nieuwe update ophogen
-APP_VERSIE = "1.03"
+# versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
+APP_VERSIE = "1.05 - 12-10-2026 12:25"
 
 
 @app.after_request
@@ -1089,73 +1089,101 @@ TEMPLATES = {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Transportbeheer</title>
 <style>
-body{font-family:system-ui,sans-serif;margin:0;background:#f4f5f7;color:#222}
-header{background:#1f3a5f;color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
-header a{color:#fff;margin-left:14px;text-decoration:none}
-main{padding:20px;max-width:1200px;margin:auto}
+body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;background:#faf9f8;color:#323130}
+a{color:#0078d4}
+.topbar{position:fixed;top:0;left:0;right:0;height:48px;background:#1b1b1b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:10;box-sizing:border-box}
+.topbar .merk{font-weight:600;font-size:15px}
+.topbar .gebruiker{font-size:13px;color:#d2d0ce}
+.shell{padding-top:48px}
+aside{position:fixed;top:48px;bottom:0;left:0;width:220px;background:#fff;border-right:1px solid #edebe9;overflow-y:auto;padding:8px 0;box-sizing:border-box}
+aside .groep{font-size:12px;font-weight:600;color:#605e5c;padding:14px 20px 4px}
+aside a{display:block;padding:7px 20px 7px 17px;color:#323130;text-decoration:none;border-left:3px solid transparent}
+aside a:hover{background:#f3f2f1}
+aside a.actief{background:#f3f2f1;border-left-color:#0078d4;font-weight:600;color:#005a9e}
+.inhoud{margin-left:220px;min-width:0}
+main{padding:20px 28px;max-width:1280px}
+h2{font-size:24px;font-weight:600;margin:4px 0 16px}
+h3{font-size:16px;font-weight:600;margin:8px 0}
 table{width:100%;border-collapse:collapse;background:#fff}
-th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left;font-size:14px;vertical-align:top}
-input,select,textarea{padding:7px;border:1px solid #bbb;border-radius:4px;font:inherit;width:100%;box-sizing:border-box}
+th,td{padding:8px;border-bottom:1px solid #edebe9;text-align:left;font-size:14px;vertical-align:top}
+th{font-weight:600;color:#605e5c;font-size:13px}
+tr:hover td{background:#f3f2f1}
+input,select,textarea{padding:6px 8px;border:1px solid #8a8886;border-radius:2px;font:inherit;width:100%;box-sizing:border-box;background:#fff;color:#323130}
+input:focus,select:focus,textarea:focus{outline:2px solid #0078d4;outline-offset:-1px;border-color:#0078d4}
 input[type=checkbox]{width:auto}
-button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radius:4px;cursor:pointer;text-decoration:none;display:inline-block;font:inherit}
-.gevaar{background:#b03a2e}
-.flash{background:#fff3cd;padding:10px;border-radius:4px;margin-bottom:12px}
+button,.btn{background:#0078d4;color:#fff;border:1px solid #0078d4;padding:6px 14px;border-radius:2px;cursor:pointer;text-decoration:none;display:inline-block;font:inherit}
+button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
+.gevaar{background:#fff;color:#a4262c;border:1px solid #a4262c}
+.gevaar:hover{background:#fde7e9;border-color:#a4262c}
+.flash{background:#deecf9;color:#004578;padding:10px 14px;border-left:3px solid #0078d4;margin-bottom:12px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
 .grid label{display:flex;flex-direction:column;font-size:13px;gap:4px}
-.card{background:#fff;padding:16px;border-radius:6px;margin-bottom:16px}
-.badge{padding:2px 8px;border-radius:10px;background:#e3e8ef;font-size:12px}
+.card{background:#fff;padding:16px;border:1px solid #edebe9;border-radius:2px;margin-bottom:16px}
+.badge{padding:2px 8px;border-radius:10px;background:#edebe9;font-size:12px}
 .row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
-.tabs{display:flex;gap:4px;border-bottom:2px solid #1f3a5f;margin-bottom:12px}
-.tabs a{padding:8px 16px;background:#e3e8ef;color:#222;text-decoration:none;border-radius:4px 4px 0 0}
-.tabs a.active{background:#1f3a5f;color:#fff}
+.tabs{display:flex;gap:0;border-bottom:1px solid #edebe9;margin-bottom:16px}
+.tabs a{padding:10px 14px;color:#605e5c;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a:hover{color:#323130}
+.tabs a.active{color:#323130;font-weight:600;border-bottom-color:#0078d4}
 .form-table{background:#fff}
-.form-table th{text-align:left;width:240px;font-weight:600;font-size:13px;background:#f4f5f7;vertical-align:middle}
+.form-table th{text-align:left;width:240px;font-weight:600;font-size:13px;background:#faf9f8;vertical-align:middle}
 .form-table td{padding:4px 8px}
 .form-table td input[type=text],.form-table td input[type=number],.form-table td textarea{max-width:520px}
-.rel-head{display:flex;gap:28px;flex-wrap:wrap;background:#1f3a5f;color:#fff;margin-bottom:0}
-.rel-head small{opacity:.7}
+.rel-head{display:flex;gap:28px;flex-wrap:wrap;margin-bottom:0}
+.rel-head small{color:#605e5c}
 .rel-layout{display:grid;grid-template-columns:1fr 240px;gap:12px;align-items:start}
 .rel-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .rel-cards .card{margin-bottom:0}
-.kv th{width:45%;font-weight:normal;color:#666;font-size:13px;background:none;border-bottom:1px solid #eee}
-.kv td{border-bottom:1px solid #eee}
-.rel-actions{background:#2c5282;color:#fff;border-radius:6px;padding:16px;position:sticky;top:12px}
-.rel-actions h3{color:#fff}
-.rel-actions .btn{display:block;text-align:center;margin:8px 0;background:#fff;color:#1f3a5f}
-.rel-actions .gevaar{background:#b03a2e;color:#fff}
+.kv th{width:45%;font-weight:normal;color:#605e5c;font-size:13px;background:none;border-bottom:1px solid #edebe9}
+.kv td{border-bottom:1px solid #edebe9}
+.rel-actions{background:#f3f2f1;border:1px solid #edebe9;border-radius:2px;padding:16px;position:sticky;top:60px}
+.rel-actions h3{color:#323130}
+.rel-actions .btn{display:block;text-align:center;margin:8px 0;background:#fff;color:#0078d4;border:1px solid #0078d4}
+.rel-actions .btn:hover{background:#deecf9}
+.rel-actions .gevaar{background:#fff;color:#a4262c;border:1px solid #a4262c}
 .tf-grid{display:grid;grid-template-columns:170px 1fr 170px 1fr;gap:10px 14px;align-items:center}
-.tf-grid .lbl{font-size:14px;color:#222}
+.tf-grid .lbl{font-size:14px;color:#323130}
 .tf-grid .span3{grid-column:span 3}
-.tf-grid input[readonly]{background:#eef1f5;color:#444}
-.tf-sec{grid-column:1/-1;font-weight:600;background:#f4f5f7;padding:6px 8px;border-radius:4px;margin-top:8px}
+.tf-grid input[readonly]{background:#f3f2f1;color:#605e5c}
+.tf-sec{grid-column:1/-1;font-weight:600;background:#f3f2f1;padding:6px 8px;border-radius:2px;margin-top:8px}
 .chk{display:flex;align-items:center;gap:6px;font-size:14px}
 .lad-head,.lad-row{display:grid;grid-template-columns:2fr 90px 110px 2fr 110px 80px;gap:6px;align-items:center}
 .lad-head .lbl{font-size:13px}
 .lad-row input{width:100%}
-.lad-det{border-bottom:1px solid #e3e6ea;padding-bottom:4px}
-@media (max-width:700px){.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-head{display:none}.lad-row{grid-template-columns:1fr 1fr}}
-@media (max-width:900px){.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
+.lad-det{border-bottom:1px solid #edebe9;padding-bottom:4px}
+@media (max-width:900px){aside{display:none}.inhoud{margin-left:0}.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
+@media (max-width:700px){main{padding:16px}.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-head{display:none}.lad-row{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 {% if user %}
-<header>
-  <strong>Transportbeheer</strong>
-  <nav>
-    <a href="{{ url_for('transports') }}">Transporten</a>
-    <a href="{{ url_for('relaties') }}">Relaties</a>
-    <a href="{{ url_for('locaties') }}">Locaties</a>
-    {% if user['role'] == 'beheerder' %}<a href="{{ url_for('beheer') }}">Beheer</a>{% endif %}
-    {% if user['role'] == 'beheerder' %}<a href="{{ url_for('users') }}">Gebruikers</a>{% endif %}
-    <a href="{{ url_for('logout') }}">Uitloggen ({{ user['name'] }})</a>
-  </nav>
-</header>
+{% set ep = request.path %}
+<div class="topbar">
+  <span class="merk">Transportbeheer</span>
+  <span class="gebruiker">{{ user['name'] }}</span>
+</div>
+<aside>
+  <div class="groep">Inzet</div>
+  <a href="{{ url_for('transports') }}" class="{{ 'actief' if ep.startswith('/transporten') }}">Transporten</a>
+  <div class="groep">Stamgegevens</div>
+  <a href="{{ url_for('relaties') }}" class="{{ 'actief' if ep.startswith('/relaties') }}">Relaties</a>
+  <a href="{{ url_for('locaties') }}" class="{{ 'actief' if ep.startswith('/locaties') }}">Locaties</a>
+  {% if user['role'] == 'beheerder' %}
+  <div class="groep">Instellingen</div>
+  <a href="{{ url_for('beheer') }}" class="{{ 'actief' if ep.startswith('/beheer') }}">Beheer</a>
+  <a href="{{ url_for('users') }}" class="{{ 'actief' if ep.startswith('/gebruikers') }}">Gebruikers</a>
+  {% endif %}
+  <div class="groep">Account</div>
+  <a href="{{ url_for('logout') }}">Uitloggen</a>
+</aside>
+<div class="inhoud shell">
 {% endif %}
 <main>
 {% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
-<p style="text-align:center;color:#888;font-size:12px;margin:24px 0">Versie van {{ APP_VERSIE }}</p>
+<p style="text-align:center;color:#605e5c;font-size:12px;margin:24px 0">Versie van {{ APP_VERSIE }}</p>
+{% if user %}</div>{% endif %}
 </body>
 </html>""",
 

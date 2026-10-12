@@ -160,9 +160,6 @@ INSERT OR IGNORE INTO afdelingen (naam) VALUES ('Nederland'), ('Duitsland'), ('F
 CREATE TABLE IF NOT EXISTS email_planning_opties (
     naam TEXT PRIMARY KEY
 );
-CREATE TABLE IF NOT EXISTS bijzonderheden_lossen_opties (
-    naam TEXT PRIMARY KEY
-);
 CREATE TABLE IF NOT EXISTS bijzonderheden_opties (
     naam TEXT PRIMARY KEY
 );
@@ -330,7 +327,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.12 - 12-10-2026 14:55"
+APP_VERSIE = "1.13 - 12-10-2026 15:00"
 
 
 @app.after_request
@@ -393,7 +390,11 @@ def verwerk_email_planning(waarde):
     return waarde
 
 
-def verwerk_keuze(veld, tabel, waarde):
+# bijzonderheden laden en lossen gebruiken dezelfde lijst
+BIJZ_KOLOMMEN = ["bijz_laden_1", "bijz_lossen_1"]
+
+
+def verwerk_keuze(veld, tabel, waarde, kolommen=None):
     """Toevoegen of wijzigen van een keuzelijst-tekst uit het transportformulier (bijvoorbeeld bijzonderheden)."""
     nieuw = request.form.get("nieuwe_" + veld, "").strip()
     wijzig = request.form.get("wijzig_" + veld, "").strip()
@@ -401,7 +402,8 @@ def verwerk_keuze(veld, tabel, waarde):
     if nieuw and wijzig and wijzig != nieuw:
         db.execute(f"INSERT OR IGNORE INTO {tabel} (naam) VALUES (?)", (nieuw,))
         db.execute(f"DELETE FROM {tabel} WHERE naam = ?", (wijzig,))
-        db.execute(f"UPDATE transports SET {veld} = ? WHERE {veld} = ?", (nieuw, wijzig))
+        for kolom in (kolommen or [veld]):
+            db.execute(f"UPDATE transports SET {kolom} = ? WHERE {kolom} = ?", (nieuw, wijzig))
         return nieuw
     if nieuw:
         db.execute(f"INSERT OR IGNORE INTO {tabel} (naam) VALUES (?)", (nieuw,))
@@ -474,8 +476,8 @@ def parse_transport_form():
         data["afdeling"] = nieuw
     # een zelf toegevoegd 'laden met' wordt bewaard in de keuzelijst
     data["email_planning"] = verwerk_email_planning(data.get("email_planning"))
-    data["bijz_laden_1"] = verwerk_keuze("bijz_laden_1", "bijzonderheden_opties", data.get("bijz_laden_1"))
-    data["bijz_lossen_1"] = verwerk_keuze("bijz_lossen_1", "bijzonderheden_lossen_opties", data.get("bijz_lossen_1"))
+    data["bijz_laden_1"] = verwerk_keuze("bijz_laden_1", "bijzonderheden_opties", data.get("bijz_laden_1"), BIJZ_KOLOMMEN)
+    data["bijz_lossen_1"] = verwerk_keuze("bijz_lossen_1", "bijzonderheden_opties", data.get("bijz_lossen_1"), BIJZ_KOLOMMEN)
     nieuw_lm = request.form.get("nieuwe_laden_met", "").strip()
     if nieuw_lm:
         get_db().execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (nieuw_lm,))
@@ -632,21 +634,17 @@ def render_form(t, title, action):
     if huidig_ep and huidig_ep not in ep:
         ep.append(huidig_ep)
     bz = [r["naam"] for r in db.execute("SELECT naam FROM bijzonderheden_opties ORDER BY naam")]
-    try:
-        huidig_bz = t["bijz_laden_1"]
-    except (KeyError, IndexError, TypeError):
-        huidig_bz = None
-    if huidig_bz and huidig_bz not in bz:
-        bz.append(huidig_bz)
-    bzl = [r["naam"] for r in db.execute("SELECT naam FROM bijzonderheden_lossen_opties ORDER BY naam")]
-    try:
-        huidig_bzl = t["bijz_lossen_1"]
-    except (KeyError, IndexError, TypeError):
-        huidig_bzl = None
-    if huidig_bzl and huidig_bzl not in bzl:
-        bzl.append(huidig_bzl)
-    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep,
-                  bijz_laden_1=bz, bijz_lossen_1=bzl)
+    bz_opties = {}
+    for veld in BIJZ_KOLOMMEN:
+        lijst = list(bz)
+        try:
+            huidig = t[veld]
+        except (KeyError, IndexError, TypeError):
+            huidig = None
+        if huidig and huidig not in lijst:
+            lijst.append(huidig)  # oude waarde blijft zichtbaar
+        bz_opties[veld] = lijst
+    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
@@ -1041,16 +1039,13 @@ def export_relaties():
 # ---------- routes: gebruikers (alleen beheerder) ----------
 
 BEHEER_LIJSTEN = {
-    "afdelingen": {"tabel": "afdelingen", "kolom": "afdeling", "titel": "Afdeling (landen)",
+    "afdelingen": {"tabel": "afdelingen", "kolommen": ["afdeling"], "titel": "Afdeling (landen)",
                    "uitleg": "Deze lijst zie je als keuzemenu bij Afdeling op het transportformulier."},
-    "laden_met": {"tabel": "laden_met_opties", "kolom": "laden_met", "titel": "Laden met",
+    "laden_met": {"tabel": "laden_met_opties", "kolommen": ["laden_met"], "titel": "Laden met",
                   "uitleg": "Deze lijst zie je als keuzemenu bij Laden met op het transportformulier."},
-    "bijzonderheden": {"tabel": "bijzonderheden_opties", "kolom": "bijz_laden_1",
-                       "titel": "Bijzonderheden laden",
-                       "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden laden op het transportformulier."},
-    "bijzonderheden_lossen": {"tabel": "bijzonderheden_lossen_opties", "kolom": "bijz_lossen_1",
-                              "titel": "Bijzonderheden lossen",
-                              "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden lossen op het transportformulier."},
+    "bijzonderheden": {"tabel": "bijzonderheden_opties", "kolommen": BIJZ_KOLOMMEN,
+                       "titel": "Bijzonderheden laden en lossen",
+                       "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden laden én Bijzonderheden lossen op het transportformulier."},
 }
 
 
@@ -1070,9 +1065,11 @@ def beheer():
     lijsten = []
     for sleutel, info in BEHEER_LIJSTEN.items():
         namen = [r["naam"] for r in db.execute(f"SELECT naam FROM {info['tabel']} ORDER BY naam")]
-        gebruik = {r["k"]: r["n"] for r in db.execute(
-            f"SELECT {info['kolom']} AS k, COUNT(*) AS n FROM {info.get('gebruik_tabel', 'transports')} "
-            f"WHERE {info['kolom']} IS NOT NULL GROUP BY {info['kolom']}")}
+        gebruik = {}
+        for kolom in info["kolommen"]:
+            for r in db.execute(f"SELECT {kolom} AS k, COUNT(*) AS n FROM transports "
+                                f"WHERE {kolom} IS NOT NULL GROUP BY {kolom}"):
+                gebruik[r["k"]] = gebruik.get(r["k"], 0) + r["n"]
         lijsten.append({"sleutel": sleutel, "titel": info["titel"], "uitleg": info["uitleg"],
                         "namen": namen, "gebruik": gebruik})
     return render_template("beheer.html", lijsten=lijsten, gekozen=gekozen)
@@ -1112,7 +1109,8 @@ def beheer_wijzig(sleutel):
     else:
         db.execute(f"UPDATE {info['tabel']} SET naam = ? WHERE naam = ?", (nieuw, oud))
         # transporten die deze waarde hebben, krijgen de nieuwe naam
-        db.execute(f"UPDATE {info.get('gebruik_tabel', 'transports')} SET {info['kolom']} = ? WHERE {info['kolom']} = ?", (nieuw, oud))
+        for kolom in info["kolommen"]:
+            db.execute(f"UPDATE transports SET {kolom} = ? WHERE {kolom} = ?", (nieuw, oud))
         db.commit()
         flash(f"'{oud}' is gewijzigd in '{nieuw}'. Transporten die dit gebruikten, zijn bijgewerkt.")
     return redirect(url_for("beheer", lijst=sleutel))
@@ -1121,10 +1119,10 @@ def beheer_wijzig(sleutel):
 @app.route("/beheer/<sleutel>/verwijder", methods=["POST"])
 @admin_required
 def beheer_verwijder(sleutel):
-    _lijst(sleutel)
+    info = _lijst(sleutel)
     oud = request.form.get("oud", "")
     db = get_db()
-    db.execute(f"DELETE FROM {_lijst(sleutel)['tabel']} WHERE naam = ?", (oud,))
+    db.execute(f"DELETE FROM {info['tabel']} WHERE naam = ?", (oud,))
     db.commit()
     flash(f"'{oud}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
     return redirect(url_for("beheer", lijst=sleutel))

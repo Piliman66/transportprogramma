@@ -79,6 +79,7 @@ TRANSPORT_FIELDS = [
     ("status_opmerking", "Tekst in het veld", "text"),
     ("customer_id", "Debiteur", "rel_opdrachtgever"),
     ("carrier_id", "Vervoerder", "rel_vervoerder"),
+    ("email_planning", "E-mail planning", "emailplanning"),
     ("afdeling", "Afdeling", "afdeling"),
     ("referentie", "Referentie", "text"),
     ("vehicle_plate", "Kenteken", "text"),
@@ -323,7 +324,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.07 - 12-10-2026 14:12"
+APP_VERSIE = "1.08 - 12-10-2026 14:20"
 
 
 @app.after_request
@@ -366,6 +367,26 @@ def next_relation_code(soort):
     return f"{SOORTEN[soort][0]}{n:05d}"
 
 
+def verwerk_email_planning(waarde):
+    """Bewaart een zelf toegevoegd of gewijzigd e-mailadres voor planning en geeft de waarde terug om op te slaan."""
+    nieuw = request.form.get("nieuwe_email_planning", "").strip()
+    wijzig = request.form.get("wijzig_email_planning", "").strip()
+    db = get_db()
+    if nieuw and wijzig and wijzig != nieuw:
+        # bestaand adres gewijzigd: de lijst, relaties en transporten krijgen de nieuwe naam
+        db.execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw,))
+        db.execute("DELETE FROM email_planning_opties WHERE naam = ?", (wijzig,))
+        db.execute("UPDATE relaties SET email_planning = ? WHERE email_planning = ?", (nieuw, wijzig))
+        db.execute("UPDATE transports SET email_planning = ? WHERE email_planning = ?", (nieuw, wijzig))
+        return nieuw
+    if nieuw:
+        db.execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw,))
+        return nieuw
+    if waarde in ("__nieuw__", "__wijzig__"):
+        return None
+    return waarde
+
+
 def velden_voor(soort):
     """E-mail planning bestaat alleen bij vervoerders."""
     return [f for f in RELATION_FIELDS if f[2] != "emailplanning" or soort == "vervoerder"]
@@ -385,21 +406,7 @@ def parse_relation_form():
                 data[name] = None
         else:
             data[name] = request.form.get(name, "").strip() or None
-    # e-mail planning: keuze uit de lijst, of een nieuw adres dat meteen wordt toegevoegd
-    nieuw_ep = request.form.get("nieuwe_email_planning", "").strip()
-    wijzig_ep = request.form.get("wijzig_email_planning", "").strip()
-    if nieuw_ep and wijzig_ep and wijzig_ep != nieuw_ep:
-        # bestaand adres gewijzigd: de lijst en alle relaties die het adres hebben, krijgen de nieuwe naam
-        db = get_db()
-        db.execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw_ep,))
-        db.execute("DELETE FROM email_planning_opties WHERE naam = ?", (wijzig_ep,))
-        db.execute("UPDATE relaties SET email_planning = ? WHERE email_planning = ?", (nieuw_ep, wijzig_ep))
-        data["email_planning"] = nieuw_ep
-    elif nieuw_ep:
-        get_db().execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw_ep,))
-        data["email_planning"] = nieuw_ep
-    elif data.get("email_planning") == "__nieuw__":
-        data["email_planning"] = None
+    data["email_planning"] = verwerk_email_planning(data.get("email_planning"))
     if not data["name"]:
         errors.append("Naam is verplicht.")
     elif not data["zoektekst"]:
@@ -440,6 +447,7 @@ def parse_transport_form():
         get_db().execute("INSERT OR IGNORE INTO afdelingen (naam) VALUES (?)", (nieuw,))
         data["afdeling"] = nieuw
     # een zelf toegevoegd 'laden met' wordt bewaard in de keuzelijst
+    data["email_planning"] = verwerk_email_planning(data.get("email_planning"))
     nieuw_lm = request.form.get("nieuwe_laden_met", "").strip()
     if nieuw_lm:
         get_db().execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (nieuw_lm,))
@@ -588,7 +596,14 @@ def render_form(t, title, action):
         huidig_lm = None
     if huidig_lm and huidig_lm not in laden_met:
         laden_met.append(huidig_lm)  # oude waarde blijft zichtbaar
-    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met)
+    ep = [r["naam"] for r in db.execute("SELECT naam FROM email_planning_opties ORDER BY naam")]
+    try:
+        huidig_ep = t["email_planning"]
+    except (KeyError, IndexError, TypeError):
+        huidig_ep = None
+    if huidig_ep and huidig_ep not in ep:
+        ep.append(huidig_ep)
+    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
@@ -1274,6 +1289,15 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
       <option value="__nieuw__">+ Land toevoegen…</option>
     </select>
     <input type="hidden" name="nieuwe_afdeling" id="nieuwe_afdeling" value="">
+  {% elif F[name][1] == 'emailplanning' %}
+    <select name="{{ name }}" id="ep_sel_t">
+      <option value="">—</option>
+      {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+      <option value="__nieuw__">+ E-mailadres toevoegen…</option>
+      <option value="__wijzig__">✎ Gekozen adres wijzigen…</option>
+    </select>
+    <input type="hidden" name="nieuwe_email_planning" id="nieuwe_ep_t" value="">
+    <input type="hidden" name="wijzig_email_planning" id="wijzig_ep_t" value="">
   {% elif F[name][1] == 'ladenmet' %}
     <select name="{{ name }}" id="laden_met_sel">
       <option value="">—</option>
@@ -1332,8 +1356,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   </select>
   <span class="lbl">Naam vervoerder</span>
   <input id="v_name" readonly>
-  <span class="lbl">E-mail planning</span>
-  <input id="v_email_planning" readonly>
+  {{ f('email_planning') }}
 
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
@@ -1468,10 +1491,11 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     setVal('c_tel', r && r.telefoon);
     setVal('c_email', r && r.email);
   }
-  function showCarrier() {
+  function showCarrier(init) {
     const r = REL[byName('carrier_id').value];
     setVal('v_name', r && r.name);
-    setVal('v_email_planning', r && r.email_planning);
+    // bij het kiezen van een vervoerder het planningsadres van die vervoerder; bij openen niet
+    if (!init && r && r.email_planning) setEP(r.email_planning);
   }
   // locaties (laad- en losplaatsen): vul de velden in vanuit de gekozen locatie
   const LOC = {{ locs|tojson }};
@@ -1526,6 +1550,39 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   }
   keuzeMetNieuw('afdeling_sel', 'nieuwe_afdeling', 'Naam van het land:');
   keuzeMetNieuw('laden_met_sel', 'nieuwe_laden_met', 'Nieuwe omschrijving voor Laden met:');
+  // e-mail planning: toevoegen of wijzigen, en het adres van de vervoerder kiezen
+  function setEP(v) {
+    const s = document.getElementById('ep_sel_t');
+    if (!s || !v) return;
+    if (![...s.options].some(o => o.value === v)) s.insertBefore(new Option(v, v), s.querySelector('option[value="__nieuw__"]'));
+    s.value = v;
+    document.getElementById('nieuwe_ep_t').value = '';
+    document.getElementById('wijzig_ep_t').value = '';
+  }
+  (function () {
+    const sel = document.getElementById('ep_sel_t'), hid = document.getElementById('nieuwe_ep_t'), wij = document.getElementById('wijzig_ep_t');
+    let vorige = sel.value;
+    sel.addEventListener('change', () => {
+      if (sel.value === '__wijzig__') {
+        const oud = vorige && vorige !== '__nieuw__' ? vorige : '';
+        if (!oud) { alert('Kies eerst een e-mailadres om te wijzigen.'); sel.value = vorige; return; }
+        const naam = (prompt('Nieuw e-mailadres voor planning:', oud) || '').trim();
+        if (!naam || naam === oud) { sel.value = oud; return; }
+        sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]'));
+        sel.value = naam; hid.value = naam; wij.value = oud;
+        vorige = sel.value;
+        return;
+      }
+      wij.value = '';
+      if (sel.value !== '__nieuw__') { vorige = sel.value; hid.value = ''; return; }
+      const naam = (prompt('E-mailadres voor planning:') || '').trim();
+      if (!naam) { sel.value = vorige; return; }
+      const bestaand = [...sel.options].find(o => o.value && o.value !== '__nieuw__' && o.value.toLowerCase() === naam.toLowerCase());
+      if (bestaand) { sel.value = bestaand.value; hid.value = ''; }
+      else { sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]')); sel.value = naam; hid.value = naam; }
+      vorige = sel.value;
+    });
+  })();
   // laadregels: tot en met de laatste ingevulde regel open, de rest ingeklapt
   function syncLad() {
     let laatste = 0;
@@ -1539,11 +1596,11 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   document.querySelectorAll('.lad-row input').forEach(el => el.addEventListener('input', syncLad));
   syncLad();
   byName('customer_id').addEventListener('change', showCustomer);
-  byName('carrier_id').addEventListener('change', showCarrier);
+  byName('carrier_id').addEventListener('change', () => showCarrier(false));
   byName('laad_locatie_id').addEventListener('change', () => showLoc('laad_locatie_id', 'l_'));
   byName('los_locatie_id').addEventListener('change', () => showLoc('los_locatie_id', 'lo_'));
   showCustomer();
-  showCarrier();
+  showCarrier(true);
   showLoc('laad_locatie_id', 'l_');
   showLoc('los_locatie_id', 'lo_');
 </script>

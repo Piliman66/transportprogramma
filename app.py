@@ -324,7 +324,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.08 - 12-10-2026 14:20"
+APP_VERSIE = "1.09 - 12-10-2026 14:32"
 
 
 @app.after_request
@@ -1440,8 +1440,18 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 
   <div class="tf-sec">Lossen</div>
   {{ f('los_datum') }}
-  {{ f('los_tijd_van') }}
-  {{ f('los_tijd_tot') }}
+  <span class="lbl">Lostijd</span>
+  <div style="display:flex;gap:8px;align-items:center">
+    <select name="los_tijd_van" aria-label="Lostijd van">
+      <option value="">van…</option>
+      {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span>tot</span>
+    <select name="los_tijd_tot" aria-label="Lostijd tot">
+      <option value="">tot…</option>
+      {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+  </div>
   <span class="lbl">Openingstijden</span>
   <input id="lo_openingstijden" readonly>
   <span class="lbl">Losplaatscode</span>

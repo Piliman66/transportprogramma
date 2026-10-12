@@ -73,6 +73,7 @@ TRANSPORT_FIELDS = [
     ("date", "Invoerdatum", "datetime"),
     ("status", "Status", "select"),
     ("status_tijd", "Tijdstip", "time"),
+    ("status_opmerking", "Opmerking status", "text"),
     ("customer_id", "Debiteur", "rel_opdrachtgever"),
     ("carrier_id", "Vervoerder", "rel_vervoerder"),
     ("afdeling", "Afdeling", "text"),
@@ -352,10 +353,16 @@ def parse_transport_form():
             data[name] = int(raw) if raw.isdigit() else None
         else:
             data[name] = raw or None
+    # de ontvanger is de losplaats: naam en adres komen uit de gekozen locatie
+    data["receiver"] = None
+    if data.get("los_locatie_id"):
+        loc = get_db().execute("SELECT naam FROM locaties WHERE id = ?",
+                               (data["los_locatie_id"],)).fetchone()
+        data["receiver"] = loc["naam"] if loc else None
     if data["status"] not in STATUSES:
         errors.append("Ongeldige status.")
-    if not data["customer_id"] or not data["receiver"]:
-        errors.append("Opdrachtgever en ontvanger zijn verplicht.")
+    if not data["customer_id"] or not data["los_locatie_id"]:
+        errors.append("Opdrachtgever en losplaatscode zijn verplicht.")
     return data, errors
 
 
@@ -1057,6 +1064,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     </select>
     <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
   </div>
+  {{ f('status_opmerking') }}
 
   {{ f('invoice_status') }}
   {{ f('price') }}
@@ -1109,7 +1117,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     <option value="">— kies een losplaats —</option>
     {% for l in locaties %}<option value="{{ l['id'] }}" {% if t['los_locatie_id'] == l['id'] %}selected{% endif %}>{{ l['code'] }} – {{ l['naam'] }}</option>{% endfor %}
   </select>
-  <span class="lbl">Losplaats naam</span>
+  <span class="lbl">Ontvanger</span>
   <input id="lo_naam" readonly>
   <span class="lbl">Adres</span>
   <input id="lo_adres" readonly>
@@ -1120,8 +1128,6 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <span class="lbl">Land</span>
   <input id="lo_land" readonly>
 
-  {{ f('receiver') }}
-  <span></span><span></span>
   <span class="lbl">Bijzonderheden lossen</span>{{ ctl('bijz_lossen_code') }}
   <span class="lbl"></span>{{ ctl('bijz_lossen_1') }}
   <span class="lbl"></span>{{ ctl('bijz_lossen_2', True) }}

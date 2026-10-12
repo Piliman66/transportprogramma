@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.29 - 12-10-2026 21:58"
+APP_VERSIE = "1.30 - 12-10-2026 22:12"
 
 
 @app.after_request
@@ -658,13 +658,22 @@ def render_form(t, title, action):
         huidig_lm = None
     if huidig_lm and huidig_lm not in laden_met:
         laden_met.append(huidig_lm)  # oude waarde blijft zichtbaar
-    ep = [r["naam"] for r in db.execute("SELECT naam FROM email_planning_opties ORDER BY naam")]
+    # e-mail planning hoort bij de vervoerder: alleen het adres van de gekozen vervoerder
+    try:
+        vervoerder_id = t["carrier_id"]
+    except (KeyError, IndexError, TypeError):
+        vervoerder_id = None
+    ep = []
+    if vervoerder_id:
+        rij = db.execute("SELECT email_planning FROM relaties WHERE id = ?", (vervoerder_id,)).fetchone()
+        if rij and rij["email_planning"]:
+            ep.append(rij["email_planning"])
     try:
         huidig_ep = t["email_planning"]
     except (KeyError, IndexError, TypeError):
         huidig_ep = None
     if huidig_ep and huidig_ep not in ep:
-        ep.append(huidig_ep)
+        ep.append(huidig_ep)  # oude waarde blijft zichtbaar
     bz = [r["naam"] for r in db.execute("SELECT naam FROM bijzonderheden_opties ORDER BY naam")]
     bz_opties = {}
     for veld in BIJZ_KOLOMMEN:
@@ -1464,8 +1473,6 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     <select name="{{ name }}" id="ep_sel_t">
       <option value="">—</option>
       {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
-      <option value="__nieuw__">+ E-mailadres toevoegen…</option>
-      <option value="__wijzig__">✎ Gekozen adres wijzigen…</option>
     </select>
     <input type="hidden" name="nieuwe_email_planning" id="nieuwe_ep_t" value="">
     <input type="hidden" name="wijzig_email_planning" id="wijzig_ep_t" value="">
@@ -1760,7 +1767,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     const r = REL[byName('carrier_id').value];
     setVal('v_name', r && r.name);
     // bij het kiezen van een vervoerder het planningsadres van die vervoerder; bij openen niet
-    if (!init && r && r.email_planning) setEP(r.email_planning);
+    if (!init) setEP(r ? r.email_planning : '');
   }
   // locaties (laad- en losplaatsen): vul de velden in vanuit de gekozen locatie
   const LOC = {{ locs|tojson }};
@@ -1844,11 +1851,14 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   keuzeEdit('sel_bijz_laden_1', 'nieuwe_bijz_laden_1', 'wijzig_bijz_laden_1', 'Nieuwe bijzonderheden laden:', 'Bijzonderheden laden wijzigen:');
   keuzeEdit('sel_bijz_lossen_1', 'nieuwe_bijz_lossen_1', 'wijzig_bijz_lossen_1', 'Nieuwe bijzonderheden lossen:', 'Bijzonderheden lossen wijzigen:');
   // e-mail planning: toevoegen of wijzigen, en het adres van de vervoerder kiezen
+  // het e-mailadres voor planning komt uit de gekozen vervoerder (wijzigen gaat via de relatie)
   function setEP(v) {
     const s = document.getElementById('ep_sel_t');
-    if (!s || !v) return;
-    if (![...s.options].some(o => o.value === v)) s.insertBefore(new Option(v, v), s.querySelector('option[value="__nieuw__"]'));
-    s.value = v;
+    if (!s) return;
+    s.innerHTML = '';
+    s.appendChild(new Option('—', ''));
+    if (v) s.appendChild(new Option(v, v));
+    s.value = v || '';
     document.getElementById('nieuwe_ep_t').value = '';
     document.getElementById('wijzig_ep_t').value = '';
   }

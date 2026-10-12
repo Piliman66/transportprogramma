@@ -37,10 +37,12 @@ RELATION_FIELDS = [
     ("name", "Naam", "text"),
     ("visit_postcode", "Bezoekadres postcode", "text"),
     ("visit_city", "Bezoekadres plaats", "text"),
+    ("visit_adres", "Bezoekadres straat en nummer", "text"),
     ("visit_country", "Bezoekadres land", "text"),
     ("regio", "Regio", "text"),
     ("telefoon", "Telefoon", "text"),
-    ("fax", "Fax", "text"),
+    ("telefoon_bh", "Telefoon bh", "text"),
+    ("telefoon_pa", "Telefoon pa", "text"),
     ("email", "E-mail adres", "text"),
     ("email_planning", "E-mail planning", "emailplanning"),
     ("email_boekhouding", "E-mail boekhouding", "text"),
@@ -49,6 +51,7 @@ RELATION_FIELDS = [
     ("contactpersoon_functie", "Contactpersoon functie", "text"),
     ("contactpersoon_telefoon", "Contactpersoon telefoon", "text"),
     ("debiteur_code", "Debiteur code", "text"),
+    ("crediteur_code", "Crediteur code", "text"),
     ("debiteur_contactpersoon", "Contactpersoon debiteur", "text"),
     ("valuta", "Valuta", "text"),
     ("btw_code", "BTW code", "text"),
@@ -296,6 +299,11 @@ def init_db():
                 db.execute("ALTER TABLE locaties ADD COLUMN relatie_id INTEGER REFERENCES relaties(id)")
             else:
                 db.execute(f"ALTER TABLE locaties ADD COLUMN {name} TEXT")
+    have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
+    for name, _, kind in RELATION_FIELDS:
+        if name not in have_rel:
+            sqltype = "INTEGER" if kind == "bool" else "REAL" if kind == "number" else "TEXT"
+            db.execute(f"ALTER TABLE relaties ADD COLUMN {name} {sqltype}")
     db.commit()
     count = db.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     admin_pw = os.environ.get("ADMIN_PASSWORD")
@@ -331,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.17 - 12-10-2026 16:50"
+APP_VERSIE = "1.19 - 12-10-2026 17:00"
 
 
 @app.after_request
@@ -857,7 +865,9 @@ def relatie_new(soort):
 
 RELATIE_IMPORT_KOLOMMEN = {
     "Relatie": "code", "Naam": "name", "Zoektekst": "zoektekst", "Pst.postcd": "visit_postcode",
-    "Pst.plaats": "visit_city", "Regio": "regio", "Telefoon": "telefoon", "Fax": "fax", "Taal": "taal",
+    "Pst.plaats": "visit_city", "Pst.adres": "visit_adres", "Regio": "regio", "Telefoon": "telefoon",
+    "Telefoon bh": "telefoon_bh", "Telefoon pa": "telefoon_pa", "Wagenpark": "wagenpark_code", "Taal": "taal", "Debiteur": "debiteur_code",
+    "Crediteur": "crediteur_code",
 }
 
 
@@ -898,7 +908,7 @@ def importeer_relaties(bestand):
         bestaand.add(code)
         soort = soorten[code[0]]
         vals = {"soort": soort, "code": code, "name": naam}
-        for veld in ("zoektekst", "visit_postcode", "visit_city", "regio", "telefoon", "fax", "taal"):
+        for veld in [v for v in RELATIE_IMPORT_KOLOMMEN.values() if v not in ("code", "name")]:
             vals[veld] = waarde(veld)
         if not vals["zoektekst"]:
             vals["zoektekst"] = naam.upper()[:30]
@@ -1994,9 +2004,9 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <div class="rel-layout">
   <div class="rel-cards">
     {{ card('Relatie info', ['historisch', 'zoektekst', 'regio', 'taal', 'relatiesoort', 'deelmarkt', 'wagenpark_code', 'contactpersoon', 'contactpersoon_functie', 'contactpersoon_telefoon']) }}
-    {{ card('Contact', ['telefoon', 'fax', 'email', 'email_planning', 'email_boekhouding']) }}
-    {{ card('Bezoekadres', ['visit_postcode', 'visit_city', 'visit_country']) }}
-    {{ card('Facturatie', ['debiteur_code', 'debiteur_contactpersoon', 'valuta', 'btw_code', 'btw_omschrijving', 'btw_nummer', 'betalingsconditie', 'betalingsconditie_omschrijving', 'aantal_kopiefacturen', 'digitaal_factureren', 'verzamelfactuur', 'geen_efactuur_xml', 'factuur_layout', 'debiteurgroep', 'toeslag_procent']) }}
+    {{ card('Contact', ['telefoon', 'telefoon_bh', 'telefoon_pa', 'email', 'email_planning', 'email_boekhouding']) }}
+    {{ card('Bezoekadres', ['visit_adres', 'visit_postcode', 'visit_city', 'visit_country']) }}
+    {{ card('Facturatie', ['debiteur_code', 'crediteur_code', 'debiteur_contactpersoon', 'valuta', 'btw_code', 'btw_omschrijving', 'btw_nummer', 'betalingsconditie', 'betalingsconditie_omschrijving', 'aantal_kopiefacturen', 'digitaal_factureren', 'verzamelfactuur', 'geen_efactuur_xml', 'factuur_layout', 'debiteurgroep', 'toeslag_procent']) }}
     {{ card('Informatie', ['informatie', 'attentie']) }}
     <div class="card">
       <h3 style="margin-top:0">Locaties (laad- en losplaatsen)</h3>

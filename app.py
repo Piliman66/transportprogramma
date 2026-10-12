@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.32 - 12-10-2026 22:24"
+APP_VERSIE = "1.34 - 12-10-2026 22:50"
 
 
 @app.after_request
@@ -771,7 +771,8 @@ def logout():
 def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
-    sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name FROM transports t "
+    sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
+           "ll.naam AS laad_naam, lo.naam AS los_naam FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
            "LEFT JOIN relaties c ON c.id = t.carrier_id "
            "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
@@ -1487,19 +1488,20 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <button>Zoeken</button>
 </form>
 <table>
-<tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Ontvanger</th><th>Vervoerder</th><th>Factuur</th></tr>
+<tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr class="{{ 'nog-indelen' if t['status'] == 'nog indelen' else '' }}">
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td>{{ t['date']|nl_datum }}</td>
   <td><span class="badge">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
-  <td>{{ t['receiver'] or '' }}</td>
+  <td>{{ t['laad_naam'] or '' }}</td>
+  <td>{{ t['los_naam'] or '' }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="7">Nog geen transporten gevonden.</td></tr>
+<tr><td colspan="8">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}""",
@@ -1553,8 +1555,16 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     {% else %}
       {% set v = t[name] if t[name] is not none else '' %}
     {% endif %}
+    {% if F[name][1] in ('date', 'datetime') %}
+    <span style="display:flex;gap:6px;align-items:center">
+      <input type="text" name="{{ name }}" class="{{ 'span3' if span }}" value="{{ v }}" style="flex:1"
+             placeholder="{{ 'dd-mm-jjjj uu:mm' if F[name][1] == 'datetime' else 'dd-mm-jjjj' }}" inputmode="numeric">
+      <input type="date" class="kalender" title="Kies een datum in de kalender" onchange="kiesKalender(this)" style="width:auto">
+    </span>
+    {% else %}
     <input type="{{ 'time' if F[name][1] == 'time' else 'text' }}" name="{{ name }}" class="{{ 'span3' if span }}"
-           value="{{ v }}"{% if F[name][1] == 'datetime' %} placeholder="dd-mm-jjjj uu:mm"{% elif F[name][1] == 'date' %} placeholder="dd-mm-jjjj"{% endif %}{% if F[name][1] in ('date', 'datetime') %} inputmode="numeric"{% endif %}{% if name in ('vehicle_plate', 'oplegger') %} style="text-transform:uppercase"{% endif %}>
+           value="{{ v }}"{% if name in ('vehicle_plate', 'oplegger') %} style="text-transform:uppercase"{% endif %}>
+    {% endif %}
   {% endif %}
 {% endmacro %}
 {% macro f(name, span=False) %}<span class="lbl">{{ F[name][0] }}</span>{{ ctl(name, span) }}{% endmacro %}
@@ -1952,6 +1962,20 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   }
   document.querySelectorAll('.lad-row input').forEach(el => el.addEventListener('input', syncLad));
   syncLad();
+  // kalenderknop: kiest de datum in het dd-mm-jjjj-veld ernaast; een eventueel ingevulde tijd blijft staan
+  function kiesKalender(el) {
+    if (!el.value) return;
+    const txt = el.parentElement.querySelector('input[type=text]');
+    const [j, m, d] = el.value.split('-');
+    const tijd = txt.value.match(/ ([0-9]{1,2}:[0-9]{2})$/);
+    txt.value = d + '-' + m + '-' + j + (tijd ? ' ' + tijd[1] : '');
+  }
+  // kalender tonen op de datum die al in het veld staat
+  document.querySelectorAll('input.kalender').forEach(k => {
+    const txt = k.parentElement.querySelector('input[type=text]');
+    const m = txt.value.match(/^([0-9]{1,2})-([0-9]{1,2})-([0-9]{4})/);
+    if (m) k.value = m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+  });
   byName('customer_id').addEventListener('change', showCustomer);
   byName('carrier_id').addEventListener('change', () => showCarrier(false));
   byName('laad_locatie_id').addEventListener('change', () => showLoc('laad_locatie_id', 'l_'));

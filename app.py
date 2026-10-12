@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.27 - 12-10-2026 21:40"
+APP_VERSIE = "1.29 - 12-10-2026 21:58"
 
 
 @app.after_request
@@ -719,12 +719,20 @@ def transports():
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
-           "LEFT JOIN relaties c ON c.id = t.carrier_id WHERE 1 = 1")
+           "LEFT JOIN relaties c ON c.id = t.carrier_id "
+           "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
+           "LEFT JOIN locaties lo ON lo.id = t.los_locatie_id WHERE 1 = 1")
     params = []
     if q:
-        sql += (" AND (t.number LIKE ? OR cu.name LIKE ? OR cu.code LIKE ? OR t.receiver LIKE ?"
-                " OR c.name LIKE ? OR c.code LIKE ? OR t.vehicle_plate LIKE ?)")
-        params += [f"%{q}%"] * 7
+        # datum ingetypt als dd-mm-jjjj wordt ook gevonden (opslag is jjjj-mm-dd)
+        datum = q
+        m = re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})", q)
+        if m:
+            datum = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+        sql += (" AND (t.number LIKE ? OR t.date LIKE ? OR cu.name LIKE ? OR t.receiver LIKE ?"
+                " OR c.name LIKE ? OR t.vehicle_plate LIKE ?"
+                " OR ll.naam LIKE ? OR ll.plaats LIKE ? OR lo.naam LIKE ? OR lo.plaats LIKE ?)")
+        params += [f"%{q}%", f"%{datum}%"] + [f"%{q}%"] * 8
     if status in STATUSES:
         sql += " AND t.status = ?"
         params.append(status)
@@ -1407,7 +1415,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <a class="btn" href="{{ url_for('transport_new') }}">+ Nieuw transport</a>
 </div>
 <form method="get" class="card row">
-  <input name="q" value="{{ q }}" placeholder="Zoek op nummer, relatiecode, relatie, kenteken" style="max-width:420px">
+  <input name="q" value="{{ q }}" placeholder="Zoek op nummer, datum, relatie, vervoerder, kenteken, laad- of losplaats" style="max-width:520px">
   <select name="status" style="max-width:200px">
     <option value="">Alle statussen</option>
     {% for s in STATUSES %}<option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>{% endfor %}

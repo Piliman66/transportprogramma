@@ -317,9 +317,8 @@ def inject_globals():
             "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES}
 
 
-# laatste wijziging van dit bestand = moment waarop de nieuwste versie is gedeployd
-APP_VERSIE = datetime.fromtimestamp(
-    os.path.getmtime(__file__), ZoneInfo("Europe/Amsterdam")).strftime("%d-%m-%Y %H:%M")
+# versienummer: bij elke nieuwe update ophogen
+APP_VERSIE = "1.03"
 
 
 @app.after_request
@@ -976,6 +975,9 @@ def _lijst(sleutel):
 @admin_required
 def beheer():
     db = get_db()
+    gekozen = request.args.get("lijst")
+    if gekozen not in BEHEER_LIJSTEN:
+        gekozen = None  # geen pop-up openen
     lijsten = []
     for sleutel, info in BEHEER_LIJSTEN.items():
         namen = [r["naam"] for r in db.execute(f"SELECT naam FROM {info['tabel']} ORDER BY naam")]
@@ -984,7 +986,7 @@ def beheer():
             f"WHERE {info['kolom']} IS NOT NULL GROUP BY {info['kolom']}")}
         lijsten.append({"sleutel": sleutel, "titel": info["titel"], "uitleg": info["uitleg"],
                         "namen": namen, "gebruik": gebruik})
-    return render_template("beheer.html", lijsten=lijsten)
+    return render_template("beheer.html", lijsten=lijsten, gekozen=gekozen)
 
 
 @app.route("/beheer/<sleutel>/nieuw", methods=["POST"])
@@ -999,7 +1001,7 @@ def beheer_nieuw(sleutel):
         db.execute(f"INSERT OR IGNORE INTO {info['tabel']} (naam) VALUES (?)", (naam,))
         db.commit()
         flash(f"'{naam}' toegevoegd.")
-    return redirect(url_for("beheer"))
+    return redirect(url_for("beheer", lijst=sleutel))
 
 
 @app.route("/beheer/<sleutel>/wijzig", methods=["POST"])
@@ -1024,7 +1026,7 @@ def beheer_wijzig(sleutel):
         db.execute(f"UPDATE transports SET {info['kolom']} = ? WHERE {info['kolom']} = ?", (nieuw, oud))
         db.commit()
         flash(f"'{oud}' is gewijzigd in '{nieuw}'. Transporten die dit gebruikten, zijn bijgewerkt.")
-    return redirect(url_for("beheer"))
+    return redirect(url_for("beheer", lijst=sleutel))
 
 
 @app.route("/beheer/<sleutel>/verwijder", methods=["POST"])
@@ -1036,7 +1038,7 @@ def beheer_verwijder(sleutel):
     db.execute(f"DELETE FROM {_lijst(sleutel)['tabel']} WHERE naam = ?", (oud,))
     db.commit()
     flash(f"'{oud}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
-    return redirect(url_for("beheer"))
+    return redirect(url_for("beheer", lijst=sleutel))
 
 
 @app.route("/gebruikers", methods=["GET", "POST"])
@@ -1736,8 +1738,15 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 
 "beheer.html": """{% extends "base.html" %}{% block content %}
 <h2>Beheer</h2>
+<p>Kies een lijst. Die opent in een venster waarin je namen kunt wijzigen, toevoegen of verwijderen.</p>
+<select id="lijst_kies" style="max-width:320px" onchange="openLijst(this.value); this.value='';">
+  <option value="">— kies een lijst —</option>
+  {% for l in lijsten %}<option value="{{ l.sleutel }}">{{ l.titel }}</option>{% endfor %}
+</select>
+
 {% for l in lijsten %}
-<div class="card" style="margin-bottom:24px">
+<dialog id="dlg_{{ l.sleutel }}" style="width:min(620px,92vw);border:none;border-radius:8px;padding:20px">
+<div class="card" style="margin:0">
 <h3>{{ l.titel }}</h3>
 <p>{{ l.uitleg }}</p>
 
@@ -1766,8 +1775,19 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 <tr><td colspan="2">Nog niets in deze lijst.</td></tr>
 {% endfor %}
 </table>
+<form method="dialog" style="text-align:right;margin-top:12px"><button>Sluiten</button></form>
 </div>
+</dialog>
 {% endfor %}
+
+<script>
+  function openLijst(sleutel) {
+    if (!sleutel) return;
+    const d = document.getElementById('dlg_' + sleutel);
+    if (d && !d.open) d.showModal();
+  }
+  {% if gekozen %}openLijst({{ gekozen|tojson }});{% endif %}
+</script>
 {% endblock %}""",
 
 "users.html": """{% extends "base.html" %}{% block content %}

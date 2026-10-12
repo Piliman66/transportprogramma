@@ -277,7 +277,20 @@ def current_user():
 @app.context_processor
 def inject_globals():
     return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN,
-            "TIJD_OPTIES": TIJD_OPTIES}
+            "TIJD_OPTIES": TIJD_OPTIES, "APP_VERSIE": APP_VERSIE}
+
+
+# laatste wijziging van dit bestand = moment waarop de nieuwste versie is gedeployd
+APP_VERSIE = datetime.fromtimestamp(
+    os.path.getmtime(__file__), ZoneInfo("Europe/Amsterdam")).strftime("%d-%m-%Y %H:%M")
+
+
+@app.after_request
+def geen_cache(resp):
+    # zodat een gewone refresh altijd de nieuwste versie laat zien
+    if resp.mimetype == "text/html":
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 def login_required(f):
@@ -948,6 +961,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 {% for m in get_flashed_messages() %}<div class="flash">{{ m }}</div>{% endfor %}
 {% block content %}{% endblock %}
 </main>
+<p style="text-align:center;color:#888;font-size:12px;margin:24px 0">Versie van {{ APP_VERSIE }}</p>
 </body>
 </html>""",
 

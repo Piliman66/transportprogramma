@@ -16,7 +16,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
 
-STATUSES = ["nog indelen", "ingedeeld", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
+STATUSES = ["nog indelen", "ingedeeld", "onderweg laden", "onderweg lossen", "afgeleverd", "afmelden"]
 # tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
 TIJD_OPTIES = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in (0, 15, 30, 45)
                if h * 60 + m <= 21 * 60]
@@ -95,7 +95,6 @@ TRANSPORT_FIELDS = [
     ("laad_tijd_van", "Laadtijd van", "text"),
     ("laad_tijd_tot", "Laadtijd tot", "text"),
     ("laad_locatie_id", "Laadplaatscode", "rel_locatie"),
-    ("bijz_laden_code", "Bijzonderheden laden code", "text"),
     ("bijz_laden_1", "Bijzonderheden laden", "bijzonderheden"),
     ("bijz_laden_2", "Bijzonderheden laden (2)", "text"),
     ("laad_ref", "Laadnummer referentie", "text"),
@@ -111,7 +110,6 @@ TRANSPORT_FIELDS = [
     ("los_tijd_tot", "Lostijd tot", "text"),
     ("los_locatie_id", "Losplaatscode", "rel_locatie"),
     ("receiver", "Ontvanger", "text"),
-    ("bijz_lossen_code", "Bijzonderheden lossen code", "text"),
     ("bijz_lossen_1", "Bijzonderheden lossen", "bijzonderheden"),
     ("bijz_lossen_2", "Bijzonderheden lossen (2)", "text"),
     ("europalletten", "Europalletten", "bool"),
@@ -288,6 +286,8 @@ def init_db():
     # oude status 'onderweg' is nu 'onderweg laden'
     db.execute("UPDATE transports SET status = 'onderweg laden' WHERE status = 'onderweg'")
     db.execute("UPDATE transports SET status = 'ingedeeld' WHERE status = 'gepland'")
+    # status 'geannuleerd' is nu 'afmelden'
+    db.execute("UPDATE transports SET status = 'afmelden' WHERE status = 'geannuleerd'")
     # relatiecodes van 5 naar 4 cijfers (V00001 -> V0001); het nummer blijft gelijk, dus geen dubbele codes
     db.execute("UPDATE relaties SET code = substr(code, 1, 1) || printf('%04d', CAST(substr(code, 2) AS INTEGER)) "
                "WHERE length(code) = 6")
@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.22 - 12-10-2026 20:39"
+APP_VERSIE = "1.24 - 12-10-2026 21:14"
 
 
 @app.after_request
@@ -1574,8 +1574,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <span class="lbl">Land</span>
   <input id="l_land" readonly>
 
-  <span class="lbl">Bijzonderheden laden</span>{{ ctl('bijz_laden_code') }}
-  <span class="lbl"></span>{{ ctl('bijz_laden_1') }}
+  <span class="lbl">Bijzonderheden laden</span>{{ ctl('bijz_laden_1') }}
   <span class="lbl"></span>{{ ctl('bijz_laden_2', True) }}
 
   <div class="lad-head" style="grid-column:1/-1">
@@ -1629,8 +1628,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <span class="lbl">Land</span>
   <input id="lo_land" readonly>
 
-  <span class="lbl">Bijzonderheden lossen</span>{{ ctl('bijz_lossen_code') }}
-  <span class="lbl"></span>{{ ctl('bijz_lossen_1') }}
+  <span class="lbl">Bijzonderheden lossen</span>{{ ctl('bijz_lossen_1') }}
   <span class="lbl"></span>{{ ctl('bijz_lossen_2', True) }}
 
   <div class="tf-sec">Overig</div>

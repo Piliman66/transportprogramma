@@ -41,7 +41,7 @@ RELATION_FIELDS = [
     ("telefoon", "Telefoon", "text"),
     ("fax", "Fax", "text"),
     ("email", "E-mail adres", "text"),
-    ("email_planning", "E-mail planning", "text"),
+    ("email_planning", "E-mail planning", "emailplanning"),
     ("email_boekhouding", "E-mail boekhouding", "text"),
     ("taal", "Taal", "text"),
     ("contactpersoon", "Contactpersoon", "text"),
@@ -156,6 +156,9 @@ CREATE TABLE IF NOT EXISTS afdelingen (
     naam TEXT PRIMARY KEY
 );
 INSERT OR IGNORE INTO afdelingen (naam) VALUES ('Nederland'), ('Duitsland'), ('Frankrijk'), ('België');
+CREATE TABLE IF NOT EXISTS email_planning_opties (
+    naam TEXT PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS laden_met_opties (
     naam TEXT PRIMARY KEY
 );
@@ -314,11 +317,13 @@ def current_user():
 def inject_globals():
     return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN,
             "TIJD_OPTIES": TIJD_OPTIES, "APP_VERSIE": APP_VERSIE,
-            "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES}
+            "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES,
+            "EMAIL_PLANNING": [r["naam"] for r in get_db().execute(
+                "SELECT naam FROM email_planning_opties ORDER BY naam")]}
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.05 - 12-10-2026 12:25"
+APP_VERSIE = "1.07 - 12-10-2026 14:12"
 
 
 @app.after_request
@@ -361,6 +366,11 @@ def next_relation_code(soort):
     return f"{SOORTEN[soort][0]}{n:05d}"
 
 
+def velden_voor(soort):
+    """E-mail planning bestaat alleen bij vervoerders."""
+    return [f for f in RELATION_FIELDS if f[2] != "emailplanning" or soort == "vervoerder"]
+
+
 def parse_relation_form():
     data, errors = {}, []
     for name, label, kind in RELATION_FIELDS:
@@ -375,6 +385,21 @@ def parse_relation_form():
                 data[name] = None
         else:
             data[name] = request.form.get(name, "").strip() or None
+    # e-mail planning: keuze uit de lijst, of een nieuw adres dat meteen wordt toegevoegd
+    nieuw_ep = request.form.get("nieuwe_email_planning", "").strip()
+    wijzig_ep = request.form.get("wijzig_email_planning", "").strip()
+    if nieuw_ep and wijzig_ep and wijzig_ep != nieuw_ep:
+        # bestaand adres gewijzigd: de lijst en alle relaties die het adres hebben, krijgen de nieuwe naam
+        db = get_db()
+        db.execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw_ep,))
+        db.execute("DELETE FROM email_planning_opties WHERE naam = ?", (wijzig_ep,))
+        db.execute("UPDATE relaties SET email_planning = ? WHERE email_planning = ?", (nieuw_ep, wijzig_ep))
+        data["email_planning"] = nieuw_ep
+    elif nieuw_ep:
+        get_db().execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw_ep,))
+        data["email_planning"] = nieuw_ep
+    elif data.get("email_planning") == "__nieuw__":
+        data["email_planning"] = None
     if not data["name"]:
         errors.append("Naam is verplicht.")
     elif not data["zoektekst"]:
@@ -749,7 +774,7 @@ def relatie_new(soort):
             for e in errors:
                 flash(e)
             return render_template("relatie_form.html", c=data, title=f"Nieuwe {label.lower()}",
-                                   action=action, fields=RELATION_FIELDS)
+                                   action=action, fields=velden_voor(soort))
         db = get_db()
         code = next_relation_code(soort)
         cols = ["soort", "code"] + RELATION_NAMES
@@ -760,7 +785,7 @@ def relatie_new(soort):
         flash(f"{label} {code} aangemaakt.")
         return redirect(url_for("relatie_detail", rid=cur.lastrowid))
     return render_template("relatie_form.html", c={n: None for n in RELATION_NAMES},
-                           title=f"Nieuwe {label.lower()}", action=action, fields=RELATION_FIELDS)
+                           title=f"Nieuwe {label.lower()}", action=action, fields=velden_voor(soort))
 
 
 @app.route("/relaties/<int:rid>")
@@ -794,7 +819,7 @@ def relatie_edit(rid):
             for e in errors:
                 flash(e)
             return render_template("relatie_form.html", c=data, title=f"Bewerk {c['code']}",
-                                   action=action, fields=RELATION_FIELDS)
+                                   action=action, fields=velden_voor(c["soort"]))
         sets = ", ".join(f"{n} = ?" for n in RELATION_NAMES)
         db.execute(f"UPDATE relaties SET {sets} WHERE id = ?",
                    [data[n] for n in RELATION_NAMES] + [rid])
@@ -802,7 +827,7 @@ def relatie_edit(rid):
         flash(f"{label.capitalize()} opgeslagen.")
         return redirect(url_for("relatie_detail", rid=rid))
     return render_template("relatie_form.html", c=c, title=f"Bewerk {c['code']}",
-                           action=action, fields=RELATION_FIELDS)
+                           action=action, fields=velden_voor(c["soort"]))
 
 
 @app.route("/relaties/<int:rid>/verwijder", methods=["POST"])
@@ -982,7 +1007,7 @@ def beheer():
     for sleutel, info in BEHEER_LIJSTEN.items():
         namen = [r["naam"] for r in db.execute(f"SELECT naam FROM {info['tabel']} ORDER BY naam")]
         gebruik = {r["k"]: r["n"] for r in db.execute(
-            f"SELECT {info['kolom']} AS k, COUNT(*) AS n FROM transports "
+            f"SELECT {info['kolom']} AS k, COUNT(*) AS n FROM {info.get('gebruik_tabel', 'transports')} "
             f"WHERE {info['kolom']} IS NOT NULL GROUP BY {info['kolom']}")}
         lijsten.append({"sleutel": sleutel, "titel": info["titel"], "uitleg": info["uitleg"],
                         "namen": namen, "gebruik": gebruik})
@@ -1023,7 +1048,7 @@ def beheer_wijzig(sleutel):
     else:
         db.execute(f"UPDATE {info['tabel']} SET naam = ? WHERE naam = ?", (nieuw, oud))
         # transporten die deze waarde hebben, krijgen de nieuwe naam
-        db.execute(f"UPDATE transports SET {info['kolom']} = ? WHERE {info['kolom']} = ?", (nieuw, oud))
+        db.execute(f"UPDATE {info.get('gebruik_tabel', 'transports')} SET {info['kolom']} = ? WHERE {info['kolom']} = ?", (nieuw, oud))
         db.commit()
         flash(f"'{oud}' is gewijzigd in '{nieuw}'. Transporten die dit gebruikten, zijn bijgewerkt.")
     return redirect(url_for("beheer", lijst=sleutel))
@@ -1307,6 +1332,8 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   </select>
   <span class="lbl">Naam vervoerder</span>
   <input id="v_name" readonly>
+  <span class="lbl">E-mail planning</span>
+  <input id="v_email_planning" readonly>
 
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
@@ -1444,6 +1471,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   function showCarrier() {
     const r = REL[byName('carrier_id').value];
     setVal('v_name', r && r.name);
+    setVal('v_email_planning', r && r.email_planning);
   }
   // locaties (laad- en losplaatsen): vul de velden in vanuit de gekozen locatie
   const LOC = {{ locs|tojson }};
@@ -1623,6 +1651,16 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
       <td>
       {% if kind == 'bool' %}
         <input type="checkbox" name="{{ name }}" {% if c[name] %}checked{% endif %}>
+      {% elif kind == 'emailplanning' %}
+        {% set opts = EMAIL_PLANNING + ([c['email_planning']] if c['email_planning'] and c['email_planning'] not in EMAIL_PLANNING else []) %}
+        <select name="email_planning" id="ep_sel">
+          <option value="">—</option>
+          {% for o in opts %}<option {% if c['email_planning'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+          <option value="__nieuw__">+ E-mailadres toevoegen…</option>
+          <option value="__wijzig__">✎ Gekozen adres wijzigen…</option>
+        </select>
+        <input type="hidden" name="nieuwe_email_planning" id="nieuwe_ep" value="">
+        <input type="hidden" name="wijzig_email_planning" id="wijzig_ep" value="">
       {% elif kind == 'textarea' %}
         <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
       {% else %}
@@ -1635,6 +1673,35 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   </table>
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('relaties') }}">Annuleren</a></p>
 </form>
+<script>
+(function () {
+  const sel = document.getElementById('ep_sel'), hid = document.getElementById('nieuwe_ep');
+  const wijzig = document.getElementById('wijzig_ep');
+  if (!sel) return;
+  let vorige = sel.value;
+  sel.addEventListener('change', () => {
+    if (sel.value === '__wijzig__') {
+      // het gekozen adres (vorige keuze) krijgt een nieuwe naam
+      const oud = vorige && vorige !== '__nieuw__' ? vorige : '';
+      if (!oud) { alert('Kies eerst een e-mailadres om te wijzigen.'); sel.value = vorige; return; }
+      const naam = (prompt('Nieuw e-mailadres voor planning:', oud) || '').trim();
+      if (!naam || naam === oud) { sel.value = oud; return; }
+      sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]'));
+      sel.value = naam; hid.value = naam; wijzig.value = oud;
+      vorige = sel.value;
+      return;
+    }
+    wijzig.value = '';
+    if (sel.value !== '__nieuw__') { vorige = sel.value; hid.value = ''; return; }
+    const naam = (prompt('E-mailadres voor planning:') || '').trim();
+    if (!naam) { sel.value = vorige; return; }
+    const bestaand = [...sel.options].find(o => o.value && o.value !== '__nieuw__' && o.value.toLowerCase() === naam.toLowerCase());
+    if (bestaand) { sel.value = bestaand.value; hid.value = ''; }
+    else { sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]')); sel.value = naam; hid.value = naam; }
+    vorige = sel.value;
+  });
+})();
+</script>
 {% endblock %}""",
 
 "relatie_detail.html": """{% extends "base.html" %}{% block content %}

@@ -937,6 +937,41 @@ def export_relaties():
 
 # ---------- routes: gebruikers (alleen beheerder) ----------
 
+@app.route("/beheer")
+@admin_required
+def beheer():
+    db = get_db()
+    afdelingen = db.execute("SELECT naam FROM afdelingen ORDER BY naam").fetchall()
+    gebruik = {r["afdeling"]: r["n"] for r in db.execute(
+        "SELECT afdeling, COUNT(*) AS n FROM transports WHERE afdeling IS NOT NULL GROUP BY afdeling")}
+    return render_template("beheer.html", afdelingen=afdelingen, gebruik=gebruik)
+
+
+@app.route("/beheer/afdelingen/nieuw", methods=["POST"])
+@admin_required
+def afdeling_new():
+    naam = request.form.get("naam", "").strip()
+    if not naam:
+        flash("Vul een naam in.")
+    else:
+        db = get_db()
+        db.execute("INSERT OR IGNORE INTO afdelingen (naam) VALUES (?)", (naam,))
+        db.commit()
+        flash(f"'{naam}' toegevoegd.")
+    return redirect(url_for("beheer"))
+
+
+@app.route("/beheer/afdelingen/verwijder", methods=["POST"])
+@admin_required
+def afdeling_delete():
+    naam = request.form.get("naam", "")
+    db = get_db()
+    db.execute("DELETE FROM afdelingen WHERE naam = ?", (naam,))
+    db.commit()
+    flash(f"'{naam}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
+    return redirect(url_for("beheer"))
+
+
 @app.route("/gebruikers", methods=["GET", "POST"])
 @admin_required
 def users():
@@ -1041,6 +1076,7 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     <a href="{{ url_for('transports') }}">Transporten</a>
     <a href="{{ url_for('relaties') }}">Relaties</a>
     <a href="{{ url_for('locaties') }}">Locaties</a>
+    {% if user['role'] == 'beheerder' %}<a href="{{ url_for('beheer') }}">Beheer</a>{% endif %}
     {% if user['role'] == 'beheerder' %}<a href="{{ url_for('users') }}">Gebruikers</a>{% endif %}
     <a href="{{ url_for('logout') }}">Uitloggen ({{ user['name'] }})</a>
   </nav>
@@ -1608,6 +1644,33 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   </table>
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('locaties') }}">Annuleren</a></p>
 </form>
+{% endblock %}""",
+
+"beheer.html": """{% extends "base.html" %}{% block content %}
+<h2>Beheer</h2>
+<h3>Afdelingen (landen)</h3>
+<p>Deze lijst zie je als keuzemenu bij Afdeling op het transportformulier.</p>
+<form method="post" action="{{ url_for('afdeling_new') }}" class="row" style="margin-bottom:12px">
+  <input name="naam" placeholder="Nieuw land, bijvoorbeeld Italië" required style="max-width:320px">
+  <button>+ Toevoegen</button>
+</form>
+<table>
+<tr><th>Naam</th><th>Gebruikt bij transporten</th><th></th></tr>
+{% for a in afdelingen %}
+<tr>
+  <td>{{ a['naam'] }}</td>
+  <td>{{ gebruik.get(a['naam'], 0) }}</td>
+  <td>
+    <form method="post" action="{{ url_for('afdeling_delete') }}" onsubmit="return confirm('Verwijderen uit de lijst?')">
+      <input type="hidden" name="naam" value="{{ a['naam'] }}">
+      <button class="gevaar">Verwijderen</button>
+    </form>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="3">Nog geen afdelingen.</td></tr>
+{% endfor %}
+</table>
 {% endblock %}""",
 
 "users.html": """{% extends "base.html" %}{% block content %}

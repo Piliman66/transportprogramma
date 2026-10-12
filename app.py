@@ -362,15 +362,25 @@ def parse_transport_form():
 BEDRIJF_START_JAAR = 2007  # 2026 - 2007 = 19 jaar bestaan
 
 
-def next_transport_number():
-    """Opdrachtnummer JJ-B-NNNN: JJ = laatste 2 cijfers van het jaar,
-    B = aantal jaren dat het bedrijf bestaat, NNNN = volgnummer binnen dat jaar."""
-    db = get_db()
+def transport_prefix():
+    """Opdrachtnummer JJ-B: JJ = laatste 2 cijfers van het jaar,
+    B = aantal jaren dat het bedrijf bestaat. Geeft (prefix, teller-sleutel)."""
     now = datetime.now(ZoneInfo("Europe/Amsterdam"))
-    jj = now.year % 100
-    jaren = now.year - BEDRIJF_START_JAAR
-    prefix = f"{jj:02d}-{jaren}"
-    soort = f"opdracht {prefix}"
+    prefix = f"{now.year % 100:02d}-{now.year - BEDRIJF_START_JAAR}"
+    return prefix, f"opdracht {prefix}"
+
+
+def preview_transport_number():
+    """Het opdrachtnummer dat het volgende transport krijgt (zonder teller te verhogen)."""
+    prefix, soort = transport_prefix()
+    row = get_db().execute("SELECT n FROM counters WHERE soort = ?", (soort,)).fetchone()
+    return f"{prefix}-{(row['n'] if row else 0) + 1:04d}"
+
+
+def next_transport_number():
+    """Reserveert het volgende opdrachtnummer JJ-B-NNNN en verhoogt de teller."""
+    db = get_db()
+    prefix, soort = transport_prefix()
     db.execute("INSERT INTO counters (soort, n) VALUES (?, 0) ON CONFLICT(soort) DO NOTHING", (soort,))
     db.execute("UPDATE counters SET n = n + 1 WHERE soort = ?", (soort,))
     n = db.execute("SELECT n FROM counters WHERE soort = ?", (soort,)).fetchone()["n"]
@@ -486,13 +496,15 @@ def transport_new():
         if errors:
             for e in errors:
                 flash(e)
+            data["number"] = preview_transport_number()
             return render_form(data, "Nieuw transport", url_for("transport_new"))
         tid = insert_transport(data, current_user()["id"])
         flash("Transport aangemaakt.")
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
     defaults.update(status="gepland", invoice_status="niet gefactureerd",
-                    date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"))
+                    date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"),
+                    number=preview_transport_number())
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
 
 

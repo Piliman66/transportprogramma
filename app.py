@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.26 - 12-10-2026 21:34"
+APP_VERSIE = "1.27 - 12-10-2026 21:40"
 
 
 @app.after_request
@@ -1711,7 +1711,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     gevonden.slice(0, 200).forEach(r => {
       const knop = document.createElement('button');
       knop.type = 'button';
-      knop.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:4px';
+      knop.style.cssText = 'display:block;width:100%;text-align:left;margin:0 0 4px 0;padding:6px 8px;background:#fff;color:#201f1e;border:1px solid #c8c6c4;border-radius:4px;box-shadow:none';
       const regel1 = document.createElement('strong');
       regel1.textContent = r.code + ' – ' + r.name;
       const regel2 = document.createElement('div');
@@ -1733,6 +1733,9 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     const sel = byName(zoekVeld);
     sel.value = String(id);
     sel.dispatchEvent(new Event('change'));
+    // zoekveld leegmaken, zodat een volgende zoekopdracht niet met de vorige begint
+    ['deb_naam', 'deb_plaats', 'deb_btw'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('deb_res').innerHTML = '';
     document.getElementById('dlg_deb').close();
   }
   const byName = (n) => document.querySelector('[name="' + n + '"]');

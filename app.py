@@ -76,7 +76,7 @@ TRANSPORT_FIELDS = [
     ("status_opmerking", "Tekst in het veld", "text"),
     ("customer_id", "Debiteur", "rel_opdrachtgever"),
     ("carrier_id", "Vervoerder", "rel_vervoerder"),
-    ("afdeling", "Afdeling", "text"),
+    ("afdeling", "Afdeling", "afdeling"),
     ("referentie", "Referentie", "text"),
     ("vehicle_plate", "Kenteken", "text"),
     ("oplegger", "Oplegger / trailer", "text"),
@@ -149,6 +149,10 @@ CREATE TABLE IF NOT EXISTS relaties (
     code TEXT UNIQUE NOT NULL,
     {REL_COLS}
 );
+CREATE TABLE IF NOT EXISTS afdelingen (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO afdelingen (naam) VALUES ('Nederland'), ('Duitsland'), ('Frankrijk'), ('België');
 CREATE TABLE IF NOT EXISTS laadregels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
@@ -398,6 +402,11 @@ def parse_transport_form():
         loc = get_db().execute("SELECT naam FROM locaties WHERE id = ?",
                                (data["los_locatie_id"],)).fetchone()
         data["receiver"] = loc["naam"] if loc else None
+    # een zelf toegevoegd land wordt bewaard in de lijst met afdelingen
+    nieuw = request.form.get("nieuwe_afdeling", "").strip()
+    if nieuw:
+        get_db().execute("INSERT OR IGNORE INTO afdelingen (naam) VALUES (?)", (nieuw,))
+        data["afdeling"] = nieuw
     if data["status"] not in STATUSES:
         errors.append("Ongeldige status.")
     # tijdstip en tekst alleen bewaren bij de status waar ze bij horen
@@ -528,8 +537,16 @@ def render_form(t, title, action):
         regels = parse_laadregels()
     else:
         regels = {}
+    afdelingen = [r["naam"] for r in db.execute("SELECT naam FROM afdelingen ORDER BY naam")]
+    try:
+        huidig = t["afdeling"]
+    except (KeyError, IndexError, TypeError):
+        huidig = None
+    if huidig and huidig not in afdelingen:
+        afdelingen.append(huidig)  # oude waarde blijft zichtbaar
+    opties = dict(OPTIONS, afdeling=afdelingen)
     return render_template("transport_form.html", t=t, title=title, action=action,
-                           regels=regels, fields=TRANSPORT_FIELDS, options=OPTIONS,
+                           regels=regels, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
                            F={n: (l, k) for n, l, k in TRANSPORT_FIELDS})
 
@@ -598,7 +615,7 @@ def transport_new():
         flash("Transport aangemaakt.")
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
-    defaults.update(status="nog indelen", invoice_status="niet gefactureerd",
+    defaults.update(status="nog indelen", afdeling="Duitsland", invoice_status="niet gefactureerd",
                     date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"),
                     number=preview_transport_number())
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
@@ -1092,6 +1109,13 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
       <option value="">—</option>
       {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
     </select>
+  {% elif F[name][1] == 'afdeling' %}
+    <select name="{{ name }}" id="afdeling_sel">
+      <option value="">—</option>
+      {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+      <option value="__nieuw__">+ Land toevoegen…</option>
+    </select>
+    <input type="hidden" name="nieuwe_afdeling" id="nieuwe_afdeling" value="">
   {% else %}
     {% if F[name][1] == 'datetime' %}
       {% set v = (t[name] or '')|replace(' ', 'T') %}
@@ -1303,6 +1327,23 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     syncTijd();
   });
   syncTijd();
+  // afdeling: kies een land of voeg een nieuw land toe
+  const afdSel = document.getElementById('afdeling_sel');
+  const nieuwHidden = document.getElementById('nieuwe_afdeling');
+  let afdVorige = afdSel.value;
+  afdSel.addEventListener('change', () => {
+    if (afdSel.value !== '__nieuw__') { afdVorige = afdSel.value; nieuwHidden.value = ''; return; }
+    const naam = (prompt('Naam van het land:') || '').trim();
+    if (!naam) { afdSel.value = afdVorige; return; }
+    const bestaand = [...afdSel.options].find(o => o.value && o.value !== '__nieuw__' && o.value.toLowerCase() === naam.toLowerCase());
+    if (bestaand) {
+      afdSel.value = bestaand.value; nieuwHidden.value = '';
+    } else {
+      afdSel.insertBefore(new Option(naam, naam), afdSel.querySelector('option[value="__nieuw__"]'));
+      afdSel.value = naam; nieuwHidden.value = naam;
+    }
+    afdVorige = afdSel.value;
+  });
   // laadregels: tot en met de laatste ingevulde regel open, de rest ingeklapt
   function syncLad() {
     let laatste = 0;

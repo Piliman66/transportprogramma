@@ -8,7 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from functools import wraps
 
-from flask import (Flask, Response, abort, flash, g, redirect, render_template,
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 from jinja2 import DictLoader
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.34 - 12-10-2026 22:50"
+APP_VERSIE = "1.35 - 12-10-2026 23:05"
 
 
 @app.after_request
@@ -654,28 +654,29 @@ def update_transport(t, data, user_id):
 
 def render_form(t, title, action):
     db = get_db()
-    deb_rijen = db.execute(
-        "SELECT id, code, name, visit_postcode, visit_city, btw_nummer FROM relaties "
-        "WHERE soort = 'opdrachtgever' ORDER BY name").fetchall()
-    vrv_rijen = db.execute(
-        "SELECT id, code, name, visit_postcode, visit_city, btw_nummer FROM relaties "
-        "WHERE soort = 'vervoerder' ORDER BY name").fetchall()
-
-    def zoek_json(rijen):
-        # gegevens voor het zoekvenster in het transportformulier: naam, plaats en BTW nummer
-        return [{"id": r["id"], "code": r["code"], "name": r["name"] or "",
-                 "plaats": ((r["visit_postcode"] or "") + " " + (r["visit_city"] or "")).strip(),
-                 "btw": r["btw_nummer"] or ""} for r in rijen]
-
+    # alleen de debiteur en vervoerder die in dit transport staan; de rest zoekt het formulier op de server
+    try:
+        cust_id = t["customer_id"]
+    except (KeyError, IndexError, TypeError):
+        cust_id = None
+    try:
+        carr_id = t["carrier_id"]
+    except (KeyError, IndexError, TypeError):
+        carr_id = None
+    ids = [i for i in (cust_id, carr_id) if i]
+    gekozen = {}
+    if ids:
+        for r in db.execute(f"SELECT * FROM relaties WHERE id IN ({', '.join('?' * len(ids))})", ids):
+            gekozen[r["id"]] = r
     relations = {
-        "rel_opdrachtgever": deb_rijen,
-        "rel_vervoerder": vrv_rijen,
-        "deb_json": zoek_json(deb_rijen),
-        "vrv_json": zoek_json(vrv_rijen),
+        "rel_opdrachtgever": [gekozen[cust_id]] if cust_id in gekozen else [],
+        "rel_vervoerder": [gekozen[carr_id]] if carr_id in gekozen else [],
+        "cust_label": (f"{gekozen[cust_id]['code']} – {gekozen[cust_id]['name']}" if cust_id in gekozen else ""),
+        "carr_label": (f"{gekozen[carr_id]['code']} – {gekozen[carr_id]['name']}" if carr_id in gekozen else ""),
     }
-    # gegevens per relatie, voor automatisch invullen van de velden in het formulier
+    # gegevens van de gekozen relaties, voor automatisch invullen van de velden in het formulier
     rels = {str(r["id"]): {k: (r[k] if r[k] is not None else "") for k in r.keys()}
-            for r in db.execute("SELECT * FROM relaties")}
+            for r in gekozen.values()}
     locaties = db.execute("SELECT * FROM locaties ORDER BY code").fetchall()
     locs = {str(l["id"]): {k: (l[k] if l[k] is not None else "") for k in l.keys()}
             for l in locaties}
@@ -908,10 +909,59 @@ def relaties():
                     "email", "email_planning", "email_boekhouding"]
         sql += " AND (" + " OR ".join(f"{k} LIKE ?" for k in kolommen) + ")"
         params += [f"%{q}%"] * len(kolommen)
-    sql += " ORDER BY name"
-    rows = get_db().execute(sql, params).fetchall()
+    db = get_db()
+    aantal = db.execute("SELECT COUNT(*) FROM (" + sql + ")", params).fetchone()[0]
+    pagina_grootte = 100
+    pages = max(1, -(-aantal // pagina_grootte))
+    try:
+        pagina = min(max(1, int(request.args.get("pagina", 1))), pages)
+    except ValueError:
+        pagina = 1
+    rows = db.execute(sql + " ORDER BY name LIMIT ? OFFSET ?",
+                      params + [pagina_grootte, (pagina - 1) * pagina_grootte]).fetchall()
     title = SOORTEN[soort][1] + "s" if soort in SOORTEN else "Relaties"
-    return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title)
+    return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title,
+                           aantal=aantal, pagina=pagina, pages=pages)
+
+
+# ---------- zoeken en gegevens voor het transportformulier (zonder alle relaties in de pagina) ----------
+
+@app.route("/api/relaties/zoek")
+@login_required
+def api_relaties_zoek():
+    soort = request.args.get("soort", "")
+    if soort not in SOORTEN:
+        return jsonify({"lijst": [], "meer": False})
+    naam = request.args.get("naam", "").strip()
+    plaats = request.args.get("plaats", "").strip()
+    btw = request.args.get("btw", "").strip()
+    if not (naam or plaats or btw):
+        return jsonify({"lijst": [], "meer": False})
+    sql = ("SELECT id, code, name, visit_postcode, visit_city, btw_nummer FROM relaties WHERE soort = ?")
+    params = [soort]
+    if naam:
+        sql += " AND name LIKE ?"
+        params.append(f"%{naam}%")
+    if plaats:
+        sql += " AND TRIM(COALESCE(visit_postcode, '') || ' ' || COALESCE(visit_city, '')) LIKE ?"
+        params.append(f"%{plaats}%")
+    if btw:
+        sql += " AND btw_nummer LIKE ?"
+        params.append(f"%{btw}%")
+    rijen = get_db().execute(sql + " ORDER BY name LIMIT 201", params).fetchall()
+    lijst = [{"id": r["id"], "code": r["code"], "name": r["name"] or "",
+              "plaats": ((r["visit_postcode"] or "") + " " + (r["visit_city"] or "")).strip(),
+              "btw": r["btw_nummer"] or ""} for r in rijen[:200]]
+    return jsonify({"lijst": lijst, "meer": len(rijen) > 200})
+
+
+@app.route("/api/relaties/<int:rid>")
+@login_required
+def api_relatie(rid):
+    rij = get_db().execute("SELECT * FROM relaties WHERE id = ?", (rid,)).fetchone()
+    if rij is None:
+        return jsonify(None), 404
+    return jsonify({k: ("" if rij[k] is None else rij[k]) for k in rij.keys()})
 
 
 @app.route("/relaties/nieuw/<soort>", methods=["GET", "POST"])
@@ -1579,10 +1629,8 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 
   <span class="lbl">Debiteur</span>
   <div style="display:flex;gap:6px">
-    <select name="customer_id" style="flex:1">
-      <option value="">— kies een debiteur —</option>
-      {% for r in relations['rel_opdrachtgever'] %}<option value="{{ r['id'] }}" {% if t['customer_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
-    </select>
+    <input id="cust_naam" readonly value="{{ relations['cust_label'] }}" placeholder="— kies een debiteur —" style="flex:1">
+    <input type="hidden" name="customer_id" value="{{ t['customer_id'] or '' }}">
     <button type="button" onclick="openRelZoek('customer_id')">Zoeken…</button>
   </div>
   <span class="lbl">Naam debiteur</span>
@@ -1605,10 +1653,8 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 
   <span class="lbl">Vervoerder</span>
   <div style="display:flex;gap:6px">
-    <select name="carrier_id" style="flex:1">
-      <option value="">— kies een vervoerder —</option>
-      {% for r in relations['rel_vervoerder'] %}<option value="{{ r['id'] }}" {% if t['carrier_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
-    </select>
+    <input id="carr_naam" readonly value="{{ relations['carr_label'] }}" placeholder="— kies een vervoerder —" style="flex:1">
+    <input type="hidden" name="carrier_id" value="{{ t['carrier_id'] or '' }}">
     <button type="button" onclick="openRelZoek('carrier_id')">Zoeken…</button>
   </div>
   <span class="lbl">Naam vervoerder</span>
@@ -1746,9 +1792,9 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <dialog id="dlg_deb" style="width:min(640px,92vw);border:none;border-radius:8px;padding:20px">
   <h3 id="deb_titel" style="margin-top:0">Debiteur zoeken</h3>
   <div style="display:grid;gap:8px">
-    <input id="deb_naam" placeholder="Naam" oninput="zoekDeb()">
-    <input id="deb_plaats" placeholder="Plaats" oninput="zoekDeb()">
-    <input id="deb_btw" placeholder="BTW nummer" oninput="zoekDeb()">
+    <input id="deb_naam" placeholder="Naam" oninput="zoekDebVertraagd()">
+    <input id="deb_plaats" placeholder="Plaats" oninput="zoekDebVertraagd()">
+    <input id="deb_btw" placeholder="BTW nummer" oninput="zoekDebVertraagd()">
   </div>
   <div id="deb_res" style="max-height:340px;overflow:auto;margin-top:10px"></div>
   <p style="text-align:right;margin-bottom:0"><button type="button" onclick="document.getElementById('dlg_deb').close()">Annuleren</button></p>
@@ -1756,12 +1802,14 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <script>
   // gegevens per relatie; velden met een relatie worden automatisch gevuld
   const REL = {{ rels|tojson }};
-  // zoeklijsten per keuzeveld: debiteuren en vervoerders (naam, plaats en BTW nummer)
+  // zoeken in relaties gebeurt op de server; de gegevens van een relatie worden opgehaald als je die kiest
   const ZOEK = {
-    customer_id: {titel: 'Debiteur zoeken', lijst: {{ relations['deb_json']|tojson }}},
-    carrier_id: {titel: 'Vervoerder zoeken', lijst: {{ relations['vrv_json']|tojson }}}
+    customer_id: {titel: 'Debiteur zoeken', soort: 'opdrachtgever', label: 'cust_naam'},
+    carrier_id: {titel: 'Vervoerder zoeken', soort: 'vervoerder', label: 'carr_naam'}
   };
   let zoekVeld = 'customer_id';
+  let zoekNr = 0;
+  let zoekTimer = null;
   function openRelZoek(veld) {
     zoekVeld = veld;
     document.getElementById('deb_titel').textContent = ZOEK[veld].titel;
@@ -1769,25 +1817,40 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     document.getElementById('dlg_deb').showModal();
     document.getElementById('deb_naam').focus();
   }
-  function zoekDeb() {
-    const n = document.getElementById('deb_naam').value.trim().toLowerCase();
-    const p = document.getElementById('deb_plaats').value.trim().toLowerCase();
-    const b = document.getElementById('deb_btw').value.trim().toLowerCase();
+  function zoekDebVertraagd() {
+    clearTimeout(zoekTimer);
+    zoekTimer = setTimeout(zoekDeb, 250);
+  }
+  async function zoekDeb() {
     const box = document.getElementById('deb_res');
+    const params = new URLSearchParams({
+      soort: ZOEK[zoekVeld].soort,
+      naam: document.getElementById('deb_naam').value.trim(),
+      plaats: document.getElementById('deb_plaats').value.trim(),
+      btw: document.getElementById('deb_btw').value.trim()
+    });
+    const nr = ++zoekNr;
     box.innerHTML = '';
-    if (!n && !p && !b) {
+    if (!params.get('naam') && !params.get('plaats') && !params.get('btw')) {
       box.textContent = 'Typ een naam, plaats of BTW nummer om te zoeken.';
       return;
     }
-    const gevonden = ZOEK[zoekVeld].lijst.filter(r =>
-      (!n || r.name.toLowerCase().includes(n)) &&
-      (!p || r.plaats.toLowerCase().includes(p)) &&
-      (!b || r.btw.toLowerCase().includes(b)));
-    if (!gevonden.length) {
-      box.textContent = 'Geen debiteuren gevonden.';
+    box.textContent = 'Zoeken…';
+    let data;
+    try {
+      const res = await fetch('/api/relaties/zoek?' + params.toString());
+      data = await res.json();
+    } catch (e) {
+      if (nr === zoekNr) box.textContent = 'Zoeken is mislukt. Probeer het opnieuw.';
       return;
     }
-    gevonden.slice(0, 200).forEach(r => {
+    if (nr !== zoekNr) return;  // een nieuwere zoekopdracht is al gestart
+    box.innerHTML = '';
+    if (!data.lijst.length) {
+      box.textContent = 'Geen relaties gevonden.';
+      return;
+    }
+    data.lijst.forEach(r => {
       const knop = document.createElement('button');
       knop.type = 'button';
       knop.style.cssText = 'display:block;width:100%;text-align:left;margin:0 0 4px 0;padding:6px 8px;background:#fff;color:#201f1e;border:1px solid #c8c6c4;border-radius:4px;box-shadow:none';
@@ -1798,37 +1861,49 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
       regel2.textContent = [r.plaats, r.btw].filter(Boolean).join(' · ');
       knop.appendChild(regel1);
       knop.appendChild(regel2);
-      knop.addEventListener('click', () => kiesDeb(r.id));
+      knop.addEventListener('click', () => kiesDeb(r));
       box.appendChild(knop);
     });
-    if (gevonden.length > 200) {
+    if (data.meer) {
       const meer = document.createElement('div');
       meer.style.cssText = 'font-size:12px;color:#605e5c;padding:4px';
-      meer.textContent = 'Eerste 200 van ' + gevonden.length + ' resultaten; verfijn je zoekopdracht.';
+      meer.textContent = 'Eerste 200 resultaten; verfijn je zoekopdracht.';
       box.appendChild(meer);
     }
   }
-  function kiesDeb(id) {
-    const sel = byName(zoekVeld);
-    sel.value = String(id);
-    sel.dispatchEvent(new Event('change'));
+  async function kiesDeb(r) {
+    const veld = zoekVeld;
+    await haalRel(r.id);
+    byName(veld).value = String(r.id);
+    document.getElementById(ZOEK[veld].label).value = r.code + ' – ' + r.name;
     // zoekveld leegmaken, zodat een volgende zoekopdracht niet met de vorige begint
     ['deb_naam', 'deb_plaats', 'deb_btw'].forEach(id => { document.getElementById(id).value = ''; });
     document.getElementById('deb_res').innerHTML = '';
     document.getElementById('dlg_deb').close();
+    if (veld === 'customer_id') await showCustomer(); else await showCarrier(false);
   }
   const byName = (n) => document.querySelector('[name="' + n + '"]');
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
-  function showCustomer() {
-    const r = REL[byName('customer_id').value];
+  // gegevens van een relatie ophalen als die nog niet in de pagina staat
+  async function haalRel(id) {
+    if (!id) return null;
+    if (!REL[id]) {
+      const res = await fetch('/api/relaties/' + id);
+      if (!res.ok) return null;
+      REL[id] = await res.json();
+    }
+    return REL[id];
+  }
+  async function showCustomer() {
+    const r = await haalRel(byName('customer_id').value);
     setVal('c_name', r && r.name);
     setVal('c_adres', '');
     setVal('c_plaats', r && ((r.visit_postcode || '') + ' ' + (r.visit_city || '')).trim());
     setVal('c_tel', r && r.telefoon);
     setVal('c_email', r && r.email);
   }
-  function showCarrier(init) {
-    const r = REL[byName('carrier_id').value];
+  async function showCarrier(init) {
+    const r = await haalRel(byName('carrier_id').value);
     setVal('v_name', r && r.name);
     // bij het kiezen van een vervoerder het planningsadres van die vervoerder; bij openen niet
     if (!init) setEP(r ? r.email_planning : '');
@@ -2076,6 +2151,11 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <tr><td colspan="6">Nog niets gevonden.</td></tr>
 {% endfor %}
 </table>
+<p style="display:flex;gap:12px;align-items:center">
+  <span>{{ aantal }} relaties{% if pages > 1 %}, pagina {{ pagina }} van {{ pages }}{% endif %}</span>
+  {% if pagina > 1 %}<a href="{{ url_for('relaties', soort=soort, q=q, pagina=pagina-1) }}">‹ Vorige</a>{% endif %}
+  {% if pagina < pages %}<a href="{{ url_for('relaties', soort=soort, q=q, pagina=pagina+1) }}">Volgende ›</a>{% endif %}
+</p>
 {% endblock %}""",
 
 "relaties_import.html": """{% extends "base.html" %}{% block content %}

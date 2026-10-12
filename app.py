@@ -83,7 +83,7 @@ TRANSPORT_FIELDS = [
     ("referentie", "Referentie", "text"),
     ("vehicle_plate", "Kenteken", "text"),
     ("oplegger", "Oplegger / trailer", "text"),
-    ("laden_met", "Laden met", "text"),
+    ("laden_met", "Laden met", "ladenmet"),
     ("invoice_status", "Factuurontvangst", "select"),
     ("price", "Prijs (€)", "text"),
     ("laad_datum", "Laaddatum", "date"),
@@ -156,6 +156,10 @@ CREATE TABLE IF NOT EXISTS afdelingen (
     naam TEXT PRIMARY KEY
 );
 INSERT OR IGNORE INTO afdelingen (naam) VALUES ('Nederland'), ('Duitsland'), ('Frankrijk'), ('België');
+CREATE TABLE IF NOT EXISTS laden_met_opties (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO laden_met_opties (naam) VALUES ('13,6 ldm Huif - Tautliner trailer');
 CREATE TABLE IF NOT EXISTS laadregels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
@@ -411,6 +415,11 @@ def parse_transport_form():
     if nieuw:
         get_db().execute("INSERT OR IGNORE INTO afdelingen (naam) VALUES (?)", (nieuw,))
         data["afdeling"] = nieuw
+    # een zelf toegevoegd 'laden met' wordt bewaard in de keuzelijst
+    nieuw_lm = request.form.get("nieuwe_laden_met", "").strip()
+    if nieuw_lm:
+        get_db().execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (nieuw_lm,))
+        data["laden_met"] = nieuw_lm
     if data["status"] not in STATUSES:
         errors.append("Ongeldige status.")
     # tijdstip en tekst alleen bewaren bij de status waar ze bij horen
@@ -548,7 +557,14 @@ def render_form(t, title, action):
         huidig = None
     if huidig and huidig not in afdelingen:
         afdelingen.append(huidig)  # oude waarde blijft zichtbaar
-    opties = dict(OPTIONS, afdeling=afdelingen)
+    laden_met = [r["naam"] for r in db.execute("SELECT naam FROM laden_met_opties ORDER BY naam")]
+    try:
+        huidig_lm = t["laden_met"]
+    except (KeyError, IndexError, TypeError):
+        huidig_lm = None
+    if huidig_lm and huidig_lm not in laden_met:
+        laden_met.append(huidig_lm)  # oude waarde blijft zichtbaar
+    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
@@ -620,6 +636,7 @@ def transport_new():
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
     defaults.update(status="nog indelen", afdeling="Duitsland", invoice_status="niet gefactureerd",
+                    laden_met="13,6 ldm Huif - Tautliner trailer",
                     date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"),
                     number=preview_transport_number())
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
@@ -948,7 +965,36 @@ def beheer():
     afdelingen = db.execute("SELECT naam FROM afdelingen ORDER BY naam").fetchall()
     gebruik = {r["afdeling"]: r["n"] for r in db.execute(
         "SELECT afdeling, COUNT(*) AS n FROM transports WHERE afdeling IS NOT NULL GROUP BY afdeling")}
-    return render_template("beheer.html", afdelingen=afdelingen, gebruik=gebruik)
+    laden_met = db.execute("SELECT naam FROM laden_met_opties ORDER BY naam").fetchall()
+    gebruik_lm = {r["laden_met"]: r["n"] for r in db.execute(
+        "SELECT laden_met, COUNT(*) AS n FROM transports WHERE laden_met IS NOT NULL GROUP BY laden_met")}
+    return render_template("beheer.html", afdelingen=afdelingen, gebruik=gebruik,
+                           laden_met=laden_met, gebruik_lm=gebruik_lm)
+
+
+@app.route("/beheer/laden-met/nieuw", methods=["POST"])
+@admin_required
+def laden_met_new():
+    naam = request.form.get("naam", "").strip()
+    if not naam:
+        flash("Vul een omschrijving in.")
+    else:
+        db = get_db()
+        db.execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (naam,))
+        db.commit()
+        flash(f"'{naam}' toegevoegd.")
+    return redirect(url_for("beheer"))
+
+
+@app.route("/beheer/laden-met/verwijder", methods=["POST"])
+@admin_required
+def laden_met_delete():
+    naam = request.form.get("naam", "")
+    db = get_db()
+    db.execute("DELETE FROM laden_met_opties WHERE naam = ?", (naam,))
+    db.commit()
+    flash(f"'{naam}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
+    return redirect(url_for("beheer"))
 
 
 @app.route("/beheer/afdelingen/nieuw", methods=["POST"])
@@ -1156,6 +1202,13 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
       <option value="__nieuw__">+ Land toevoegen…</option>
     </select>
     <input type="hidden" name="nieuwe_afdeling" id="nieuwe_afdeling" value="">
+  {% elif F[name][1] == 'ladenmet' %}
+    <select name="{{ name }}" id="laden_met_sel">
+      <option value="">—</option>
+      {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+      <option value="__nieuw__">+ Toevoegen…</option>
+    </select>
+    <input type="hidden" name="nieuwe_laden_met" id="nieuwe_laden_met" value="">
   {% else %}
     {% if F[name][1] == 'datetime' %}
       {% set v = (t[name] or '')|replace(' ', 'T') %}
@@ -1377,23 +1430,27 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     syncTijd();
   });
   syncTijd();
-  // afdeling: kies een land of voeg een nieuw land toe
-  const afdSel = document.getElementById('afdeling_sel');
-  const nieuwHidden = document.getElementById('nieuwe_afdeling');
-  let afdVorige = afdSel.value;
-  afdSel.addEventListener('change', () => {
-    if (afdSel.value !== '__nieuw__') { afdVorige = afdSel.value; nieuwHidden.value = ''; return; }
-    const naam = (prompt('Naam van het land:') || '').trim();
-    if (!naam) { afdSel.value = afdVorige; return; }
-    const bestaand = [...afdSel.options].find(o => o.value && o.value !== '__nieuw__' && o.value.toLowerCase() === naam.toLowerCase());
-    if (bestaand) {
-      afdSel.value = bestaand.value; nieuwHidden.value = '';
-    } else {
-      afdSel.insertBefore(new Option(naam, naam), afdSel.querySelector('option[value="__nieuw__"]'));
-      afdSel.value = naam; nieuwHidden.value = naam;
-    }
-    afdVorige = afdSel.value;
-  });
+  // keuzelijsten met "voeg toe": afdeling (land) en laden met
+  function keuzeMetNieuw(selId, hidId, vraag) {
+    const sel = document.getElementById(selId);
+    const hid = document.getElementById(hidId);
+    let vorige = sel.value;
+    sel.addEventListener('change', () => {
+      if (sel.value !== '__nieuw__') { vorige = sel.value; hid.value = ''; return; }
+      const naam = (prompt(vraag) || '').trim();
+      if (!naam) { sel.value = vorige; return; }
+      const bestaand = [...sel.options].find(o => o.value && o.value !== '__nieuw__' && o.value.toLowerCase() === naam.toLowerCase());
+      if (bestaand) {
+        sel.value = bestaand.value; hid.value = '';
+      } else {
+        sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]'));
+        sel.value = naam; hid.value = naam;
+      }
+      vorige = sel.value;
+    });
+  }
+  keuzeMetNieuw('afdeling_sel', 'nieuwe_afdeling', 'Naam van het land:');
+  keuzeMetNieuw('laden_met_sel', 'nieuwe_laden_met', 'Nieuwe omschrijving voor Laden met:');
   // laadregels: tot en met de laatste ingevulde regel open, de rest ingeklapt
   function syncLad() {
     let laatste = 0;
@@ -1683,6 +1740,30 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 </tr>
 {% else %}
 <tr><td colspan="3">Nog geen afdelingen.</td></tr>
+{% endfor %}
+</table>
+
+<h3>Laden met</h3>
+<p>Deze lijst zie je als keuzemenu bij Laden met op het transportformulier.</p>
+<form method="post" action="{{ url_for('laden_met_new') }}" class="row" style="margin-bottom:12px">
+  <input name="naam" placeholder="Nieuwe omschrijving" required style="max-width:320px">
+  <button>+ Toevoegen</button>
+</form>
+<table>
+<tr><th>Omschrijving</th><th>Gebruikt bij transporten</th><th></th></tr>
+{% for a in laden_met %}
+<tr>
+  <td>{{ a['naam'] }}</td>
+  <td>{{ gebruik_lm.get(a['naam'], 0) }}</td>
+  <td>
+    <form method="post" action="{{ url_for('laden_met_delete') }}" onsubmit="return confirm('Verwijderen uit de lijst?')">
+      <input type="hidden" name="naam" value="{{ a['naam'] }}">
+      <button class="gevaar">Verwijderen</button>
+    </form>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="3">Nog geen omschrijvingen.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}""",

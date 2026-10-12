@@ -15,7 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
 
-STATUSES = ["gepland", "nog indelen", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
+STATUSES = ["nog indelen", "ingedeeld", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
 # tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
 TIJD_OPTIES = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in (0, 15, 30, 45)
                if h * 60 + m <= 21 * 60]
@@ -240,6 +240,7 @@ def init_db():
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
     # oude status 'onderweg' is nu 'onderweg laden'
     db.execute("UPDATE transports SET status = 'onderweg laden' WHERE status = 'onderweg'")
+    db.execute("UPDATE transports SET status = 'ingedeeld' WHERE status = 'gepland'")
     # nieuwe locatievelden toevoegen aan bestaande databases
     have_loc = {r[1] for r in db.execute("PRAGMA table_info(locaties)")}
     for name, _, kind in LOC_FIELDS:

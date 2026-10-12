@@ -149,6 +149,17 @@ CREATE TABLE IF NOT EXISTS relaties (
     code TEXT UNIQUE NOT NULL,
     {REL_COLS}
 );
+CREATE TABLE IF NOT EXISTS laadregels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
+    volgorde INTEGER NOT NULL,
+    ref TEXT,
+    aantal TEXT,
+    eenheid TEXT,
+    omschrijving TEXT,
+    gewicht TEXT,
+    ldm TEXT
+);
 CREATE TABLE IF NOT EXISTS locaties (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,
@@ -238,6 +249,20 @@ def init_db():
         if name not in have:
             sqltype = "INTEGER" if kind in ("bool", "rel_locatie") else "TEXT"
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
+    # oude laadvelden eenmalig overzetten naar de tabel laadregels
+    db.execute("""INSERT INTO laadregels (transport_id, volgorde, ref, aantal, eenheid, omschrijving, gewicht, ldm)
+        SELECT id, 1, laad_ref, colli, laad_eenheid, goods_type, weight_kg, ldm FROM transports
+        WHERE (laad_ref IS NOT NULL OR colli IS NOT NULL OR laad_eenheid IS NOT NULL
+               OR goods_type IS NOT NULL OR weight_kg IS NOT NULL OR ldm IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM laadregels l WHERE l.transport_id = transports.id AND l.volgorde = 1)""")
+    db.execute("""INSERT INTO laadregels (transport_id, volgorde, ref)
+        SELECT id, 2, laad_regel_2 FROM transports
+        WHERE laad_regel_2 IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM laadregels l WHERE l.transport_id = transports.id AND l.volgorde = 2)""")
+    db.execute("""INSERT INTO laadregels (transport_id, volgorde, ref)
+        SELECT id, 3, laad_regel_3 FROM transports
+        WHERE laad_regel_3 IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM laadregels l WHERE l.transport_id = transports.id AND l.volgorde = 3)""")
     # oude status 'onderweg' is nu 'onderweg laden'
     db.execute("UPDATE transports SET status = 'onderweg laden' WHERE status = 'onderweg'")
     db.execute("UPDATE transports SET status = 'ingedeeld' WHERE status = 'gepland'")
@@ -413,6 +438,39 @@ def next_transport_number():
     return f"{prefix}-{n:04d}"
 
 
+LAAD_VELDEN = ["ref", "aantal", "eenheid", "omschrijving", "gewicht", "ldm"]
+AANTAL_LAADREGELS = 5
+# oude laadvelden: staan nu in de tabel laadregels
+OUDE_LAADVELDEN = ("laad_ref", "colli", "laad_eenheid", "goods_type", "weight_kg", "ldm",
+                   "laad_regel_2", "laad_regel_3")
+
+
+def parse_laadregels():
+    """Leest de 5 laadregels uit het formulier; alleen regels met iets ingevuld."""
+    regels = {}
+    for i in range(1, AANTAL_LAADREGELS + 1):
+        vals = {v: request.form.get(f"r{i}_{v}", "").strip() or None for v in LAAD_VELDEN}
+        if any(vals.values()):
+            regels[i] = vals
+    return regels
+
+
+def save_laadregels(tid, regels):
+    db = get_db()
+    db.execute("DELETE FROM laadregels WHERE transport_id = ?", (tid,))
+    for i, vals in regels.items():
+        db.execute(
+            "INSERT INTO laadregels (transport_id, volgorde, ref, aantal, eenheid, omschrijving, gewicht, ldm) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [tid, i] + [vals[v] for v in LAAD_VELDEN])
+
+
+def load_laadregels(tid):
+    rows = get_db().execute(
+        "SELECT * FROM laadregels WHERE transport_id = ? ORDER BY volgorde", (tid,)).fetchall()
+    return {r["volgorde"]: {v: r[v] for v in LAAD_VELDEN} for r in rows}
+
+
 def insert_transport(data, user_id):
     db = get_db()
     now = now_str()
@@ -423,6 +481,7 @@ def insert_transport(data, user_id):
         f"INSERT INTO transports ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
         vals)
     tid = cur.lastrowid
+    save_laadregels(tid, parse_laadregels())
     db.execute(
         "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
         (tid, data["status"], user_id, now))
@@ -437,6 +496,7 @@ def update_transport(t, data, user_id):
     db.execute(
         f"UPDATE transports SET {sets}, updated_at = ? WHERE id = ?",
         [data[f] for f in TRANSPORT_NAMES] + [now, t["id"]])
+    save_laadregels(t["id"], parse_laadregels())
     if data["status"] != t["status"]:
         db.execute(
             "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
@@ -458,8 +518,18 @@ def render_form(t, title, action):
     locaties = db.execute("SELECT * FROM locaties ORDER BY code").fetchall()
     locs = {str(l["id"]): {k: (l[k] if l[k] is not None else "") for k in l.keys()}
             for l in locaties}
+    try:
+        tid = t["id"]
+    except (KeyError, IndexError, TypeError):
+        tid = None
+    if tid:
+        regels = load_laadregels(tid)
+    elif request.method == "POST":
+        regels = parse_laadregels()
+    else:
+        regels = {}
     return render_template("transport_form.html", t=t, title=title, action=action,
-                           fields=TRANSPORT_FIELDS, options=OPTIONS,
+                           regels=regels, fields=TRANSPORT_FIELDS, options=OPTIONS,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
                            F={n: (l, k) for n, l, k in TRANSPORT_FIELDS})
 
@@ -555,7 +625,8 @@ def transport_detail(tid):
             related[key] = db.execute(
                 "SELECT id, code, name FROM relaties WHERE id = ?", (t[key],)).fetchone()
     return render_template("transport_detail.html", t=t, history=history,
-                           fields=TRANSPORT_FIELDS, related=related)
+                           fields=[f for f in TRANSPORT_FIELDS if f[0] not in OUDE_LAADVELDEN],
+                           related=related, regels=load_laadregels(tid))
 
 
 @app.route("/transporten/<int:tid>/bewerk", methods=["GET", "POST"])
@@ -937,10 +1008,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 .tf-grid input[readonly]{background:#eef1f5;color:#444}
 .tf-sec{grid-column:1/-1;font-weight:600;background:#f4f5f7;padding:6px 8px;border-radius:4px;margin-top:8px}
 .chk{display:flex;align-items:center;gap:6px;font-size:14px}
-.lad-tbl{display:grid;grid-template-columns:2fr 90px 110px 2fr 110px 80px;gap:6px;grid-column:1/-1;align-items:center}
-.lad-tbl .lbl{font-size:13px}
-.lad-tbl input{width:100%}
-@media (max-width:700px){.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-tbl{grid-template-columns:1fr 1fr}}
+.lad-head,.lad-row{display:grid;grid-template-columns:2fr 90px 110px 2fr 110px 80px;gap:6px;align-items:center}
+.lad-head .lbl{font-size:13px}
+.lad-row input{width:100%}
+.lad-det{border-bottom:1px solid #e3e6ea;padding-bottom:4px}
+@media (max-width:700px){.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-head{display:none}.lad-row{grid-template-columns:1fr 1fr}}
 @media (max-width:900px){.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
 </style>
 </head>
@@ -1123,12 +1195,22 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <span class="lbl"></span>{{ ctl('bijz_laden_1') }}
   <span class="lbl"></span>{{ ctl('bijz_laden_2', True) }}
 
-  <div class="lad-tbl">
-    <span class="lbl">Laadnummer</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
-    {{ ctl('laad_ref') }}{{ ctl('colli') }}{{ ctl('laad_eenheid') }}{{ ctl('goods_type') }}{{ ctl('weight_kg') }}{{ ctl('ldm') }}
-    {{ ctl('laad_regel_2') }}<span></span><span></span><span></span><span></span><span></span>
-    {{ ctl('laad_regel_3') }}<span></span><span></span><span></span><span></span><span></span>
+  <div class="lad-head" style="grid-column:1/-1">
+    <span class="lbl">Referentie</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
   </div>
+  {% for i in range(1, 6) %}{% set rr = regels.get(i, {}) %}
+  <details class="lad-det" style="grid-column:1/-1" {% if rr %}open{% endif %}>
+    <summary style="cursor:pointer;padding:6px 0">Laadnummer {{ i }}{% if not rr %} <em style="color:#888">(leeg)</em>{% endif %}</summary>
+    <div class="lad-row">
+      <input name="r{{ i }}_ref" value="{{ rr['ref'] or '' }}">
+      <input name="r{{ i }}_aantal" value="{{ rr['aantal'] or '' }}">
+      <input name="r{{ i }}_eenheid" value="{{ rr['eenheid'] or '' }}">
+      <input name="r{{ i }}_omschrijving" value="{{ rr['omschrijving'] or '' }}">
+      <input name="r{{ i }}_gewicht" value="{{ rr['gewicht'] or '' }}">
+      <input name="r{{ i }}_ldm" value="{{ rr['ldm'] or '' }}">
+    </div>
+  </details>
+  {% endfor %}
 
   <div class="tf-sec">Lossen</div>
   {{ f('los_datum') }}
@@ -1261,6 +1343,13 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name] if t[name] is not none else '') }}</td></tr>
   {% endif %}
   {% endfor %}
+  {% if regels %}
+  <tr><th style="width:220px">Laadnummers</th><td>
+    {% for i, r in regels.items() %}
+      {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
+    {% endfor %}
+  </td></tr>
+  {% endif %}
 </table>
 </div>
 

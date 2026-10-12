@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.35 - 12-10-2026 23:05"
+APP_VERSIE = "1.36 - 12-10-2026 23:02"
 
 
 @app.after_request
@@ -773,7 +773,7 @@ def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
-           "ll.naam AS laad_naam, lo.naam AS los_naam FROM transports t "
+           "ll.plaats AS laad_plaats, lo.plaats AS los_plaats FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
            "LEFT JOIN relaties c ON c.id = t.carrier_id "
            "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
@@ -1545,8 +1545,8 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <td>{{ t['date']|nl_datum }}</td>
   <td><span class="badge">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
-  <td>{{ t['laad_naam'] or '' }}</td>
-  <td>{{ t['los_naam'] or '' }}</td>
+  <td>{{ t['laad_plaats'] or '' }}</td>
+  <td>{{ t['los_plaats'] or '' }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>

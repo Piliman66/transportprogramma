@@ -359,17 +359,34 @@ def parse_transport_form():
     return data, errors
 
 
+BEDRIJF_START_JAAR = 2007  # 2026 - 2007 = 19 jaar bestaan
+
+
+def next_transport_number():
+    """Opdrachtnummer JJ-B-NNNN: JJ = laatste 2 cijfers van het jaar,
+    B = aantal jaren dat het bedrijf bestaat, NNNN = volgnummer binnen dat jaar."""
+    db = get_db()
+    now = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    jj = now.year % 100
+    jaren = now.year - BEDRIJF_START_JAAR
+    prefix = f"{jj:02d}-{jaren}"
+    soort = f"opdracht {prefix}"
+    db.execute("INSERT INTO counters (soort, n) VALUES (?, 0) ON CONFLICT(soort) DO NOTHING", (soort,))
+    db.execute("UPDATE counters SET n = n + 1 WHERE soort = ?", (soort,))
+    n = db.execute("SELECT n FROM counters WHERE soort = ?", (soort,)).fetchone()["n"]
+    return f"{prefix}-{n:04d}"
+
+
 def insert_transport(data, user_id):
     db = get_db()
     now = now_str()
     cols = TRANSPORT_NAMES + ["number", "created_by", "created_at", "updated_at"]
     vals = [data[f] for f in TRANSPORT_NAMES] + [
-        f"tmp-{secrets.token_hex(8)}", user_id, now, now]
+        next_transport_number(), user_id, now, now]
     cur = db.execute(
         f"INSERT INTO transports ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
         vals)
     tid = cur.lastrowid
-    db.execute("UPDATE transports SET number = ? WHERE id = ?", (f"T-{tid:06d}", tid))
     db.execute(
         "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
         (tid, data["status"], user_id, now))

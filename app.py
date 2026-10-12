@@ -92,7 +92,7 @@ TRANSPORT_FIELDS = [
     ("laad_tijd_tot", "Laadtijd tot", "text"),
     ("laad_locatie_id", "Laadplaatscode", "rel_locatie"),
     ("bijz_laden_code", "Bijzonderheden laden code", "text"),
-    ("bijz_laden_1", "Bijzonderheden laden", "text"),
+    ("bijz_laden_1", "Bijzonderheden laden", "bijzonderheden"),
     ("bijz_laden_2", "Bijzonderheden laden (2)", "text"),
     ("laad_ref", "Laadnummer referentie", "text"),
     ("colli", "Aantal colli", "text"),
@@ -108,7 +108,7 @@ TRANSPORT_FIELDS = [
     ("los_locatie_id", "Losplaatscode", "rel_locatie"),
     ("receiver", "Ontvanger", "text"),
     ("bijz_lossen_code", "Bijzonderheden lossen code", "text"),
-    ("bijz_lossen_1", "Bijzonderheden lossen", "text"),
+    ("bijz_lossen_1", "Bijzonderheden lossen", "bijzonderheden"),
     ("bijz_lossen_2", "Bijzonderheden lossen (2)", "text"),
     ("europalletten", "Europalletten", "bool"),
     ("laadadres_gelost", "Laadadres gelost", "text"),
@@ -158,6 +158,12 @@ CREATE TABLE IF NOT EXISTS afdelingen (
 );
 INSERT OR IGNORE INTO afdelingen (naam) VALUES ('Nederland'), ('Duitsland'), ('Frankrijk'), ('België');
 CREATE TABLE IF NOT EXISTS email_planning_opties (
+    naam TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS bijzonderheden_lossen_opties (
+    naam TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS bijzonderheden_opties (
     naam TEXT PRIMARY KEY
 );
 CREATE TABLE IF NOT EXISTS laden_met_opties (
@@ -324,7 +330,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.09 - 12-10-2026 14:32"
+APP_VERSIE = "1.12 - 12-10-2026 14:55"
 
 
 @app.after_request
@@ -387,6 +393,24 @@ def verwerk_email_planning(waarde):
     return waarde
 
 
+def verwerk_keuze(veld, tabel, waarde):
+    """Toevoegen of wijzigen van een keuzelijst-tekst uit het transportformulier (bijvoorbeeld bijzonderheden)."""
+    nieuw = request.form.get("nieuwe_" + veld, "").strip()
+    wijzig = request.form.get("wijzig_" + veld, "").strip()
+    db = get_db()
+    if nieuw and wijzig and wijzig != nieuw:
+        db.execute(f"INSERT OR IGNORE INTO {tabel} (naam) VALUES (?)", (nieuw,))
+        db.execute(f"DELETE FROM {tabel} WHERE naam = ?", (wijzig,))
+        db.execute(f"UPDATE transports SET {veld} = ? WHERE {veld} = ?", (nieuw, wijzig))
+        return nieuw
+    if nieuw:
+        db.execute(f"INSERT OR IGNORE INTO {tabel} (naam) VALUES (?)", (nieuw,))
+        return nieuw
+    if waarde in ("__nieuw__", "__wijzig__"):
+        return None
+    return waarde
+
+
 def velden_voor(soort):
     """E-mail planning bestaat alleen bij vervoerders."""
     return [f for f in RELATION_FIELDS if f[2] != "emailplanning" or soort == "vervoerder"]
@@ -423,6 +447,8 @@ def parse_transport_form():
             data[name] = 1 if request.form.get(name) else 0
             continue
         raw = request.form.get(name, "").strip()
+        if name in ("vehicle_plate", "oplegger"):
+            raw = raw.upper()  # kenteken en oplegger altijd in hoofdletters
         if name == "date":
             raw = raw.replace("T", " ")  # datetime-local geeft 'YYYY-MM-DDTHH:MM'
         if name in NUMERIC:
@@ -448,6 +474,8 @@ def parse_transport_form():
         data["afdeling"] = nieuw
     # een zelf toegevoegd 'laden met' wordt bewaard in de keuzelijst
     data["email_planning"] = verwerk_email_planning(data.get("email_planning"))
+    data["bijz_laden_1"] = verwerk_keuze("bijz_laden_1", "bijzonderheden_opties", data.get("bijz_laden_1"))
+    data["bijz_lossen_1"] = verwerk_keuze("bijz_lossen_1", "bijzonderheden_lossen_opties", data.get("bijz_lossen_1"))
     nieuw_lm = request.form.get("nieuwe_laden_met", "").strip()
     if nieuw_lm:
         get_db().execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (nieuw_lm,))
@@ -603,7 +631,22 @@ def render_form(t, title, action):
         huidig_ep = None
     if huidig_ep and huidig_ep not in ep:
         ep.append(huidig_ep)
-    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep)
+    bz = [r["naam"] for r in db.execute("SELECT naam FROM bijzonderheden_opties ORDER BY naam")]
+    try:
+        huidig_bz = t["bijz_laden_1"]
+    except (KeyError, IndexError, TypeError):
+        huidig_bz = None
+    if huidig_bz and huidig_bz not in bz:
+        bz.append(huidig_bz)
+    bzl = [r["naam"] for r in db.execute("SELECT naam FROM bijzonderheden_lossen_opties ORDER BY naam")]
+    try:
+        huidig_bzl = t["bijz_lossen_1"]
+    except (KeyError, IndexError, TypeError):
+        huidig_bzl = None
+    if huidig_bzl and huidig_bzl not in bzl:
+        bzl.append(huidig_bzl)
+    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep,
+                  bijz_laden_1=bz, bijz_lossen_1=bzl)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, locaties=locaties, locs=locs,
@@ -1002,6 +1045,12 @@ BEHEER_LIJSTEN = {
                    "uitleg": "Deze lijst zie je als keuzemenu bij Afdeling op het transportformulier."},
     "laden_met": {"tabel": "laden_met_opties", "kolom": "laden_met", "titel": "Laden met",
                   "uitleg": "Deze lijst zie je als keuzemenu bij Laden met op het transportformulier."},
+    "bijzonderheden": {"tabel": "bijzonderheden_opties", "kolom": "bijz_laden_1",
+                       "titel": "Bijzonderheden laden",
+                       "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden laden op het transportformulier."},
+    "bijzonderheden_lossen": {"tabel": "bijzonderheden_lossen_opties", "kolom": "bijz_lossen_1",
+                              "titel": "Bijzonderheden lossen",
+                              "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden lossen op het transportformulier."},
 }
 
 
@@ -1298,6 +1347,15 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     </select>
     <input type="hidden" name="nieuwe_email_planning" id="nieuwe_ep_t" value="">
     <input type="hidden" name="wijzig_email_planning" id="wijzig_ep_t" value="">
+  {% elif F[name][1] == 'bijzonderheden' %}
+    <select name="{{ name }}" id="sel_{{ name }}">
+      <option value="">—</option>
+      {% for o in options[name] %}<option {% if t[name] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+      <option value="__nieuw__">+ Toevoegen…</option>
+      <option value="__wijzig__">✎ Gekozen tekst wijzigen…</option>
+    </select>
+    <input type="hidden" name="nieuwe_{{ name }}" id="nieuwe_{{ name }}" value="">
+    <input type="hidden" name="wijzig_{{ name }}" id="wijzig_{{ name }}" value="">
   {% elif F[name][1] == 'ladenmet' %}
     <select name="{{ name }}" id="laden_met_sel">
       <option value="">—</option>
@@ -1313,7 +1371,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
       {% set v = t[name] if t[name] is not none else '' %}
     {% endif %}
     <input type="{{ 'datetime-local' if F[name][1] == 'datetime' else ('date' if F[name][1] == 'date' else ('time' if F[name][1] == 'time' else 'text')) }}" name="{{ name }}" class="{{ 'span3' if span }}"
-           value="{{ v }}">
+           value="{{ v }}"{% if name in ('vehicle_plate', 'oplegger') %} style="text-transform:uppercase"{% endif %}>
   {% endif %}
 {% endmacro %}
 {% macro f(name, span=False) %}<span class="lbl">{{ F[name][0] }}</span>{{ ctl(name, span) }}{% endmacro %}
@@ -1560,6 +1618,34 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   }
   keuzeMetNieuw('afdeling_sel', 'nieuwe_afdeling', 'Naam van het land:');
   keuzeMetNieuw('laden_met_sel', 'nieuwe_laden_met', 'Nieuwe omschrijving voor Laden met:');
+  // bijzonderheden laden: toevoegen of wijzigen
+  function keuzeEdit(selId, nieuwId, wijzigId, vraagNieuw, vraagWijzig) {
+    const sel = document.getElementById(selId), hid = document.getElementById(nieuwId), wij = document.getElementById(wijzigId);
+    if (!sel) return;
+    let vorige = sel.value;
+    sel.addEventListener('change', () => {
+      if (sel.value === '__wijzig__') {
+        const oud = vorige && vorige !== '__nieuw__' ? vorige : '';
+        if (!oud) { alert('Kies eerst een tekst om te wijzigen.'); sel.value = vorige; return; }
+        const naam = (prompt(vraagWijzig, oud) || '').trim();
+        if (!naam || naam === oud) { sel.value = oud; return; }
+        sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]'));
+        sel.value = naam; hid.value = naam; wij.value = oud;
+        vorige = sel.value;
+        return;
+      }
+      wij.value = '';
+      if (sel.value !== '__nieuw__') { vorige = sel.value; hid.value = ''; return; }
+      const naam = (prompt(vraagNieuw) || '').trim();
+      if (!naam) { sel.value = vorige; return; }
+      const bestaand = [...sel.options].find(o => o.value && o.value !== '__nieuw__' && o.value.toLowerCase() === naam.toLowerCase());
+      if (bestaand) { sel.value = bestaand.value; hid.value = ''; }
+      else { sel.insertBefore(new Option(naam, naam), sel.querySelector('option[value="__nieuw__"]')); sel.value = naam; hid.value = naam; }
+      vorige = sel.value;
+    });
+  }
+  keuzeEdit('sel_bijz_laden_1', 'nieuwe_bijz_laden_1', 'wijzig_bijz_laden_1', 'Nieuwe bijzonderheden laden:', 'Bijzonderheden laden wijzigen:');
+  keuzeEdit('sel_bijz_lossen_1', 'nieuwe_bijz_lossen_1', 'wijzig_bijz_lossen_1', 'Nieuwe bijzonderheden lossen:', 'Bijzonderheden lossen wijzigen:');
   // e-mail planning: toevoegen of wijzigen, en het adres van de vervoerder kiezen
   function setEP(v) {
     const s = document.getElementById('ep_sel_t');

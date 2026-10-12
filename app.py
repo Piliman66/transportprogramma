@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.38 - 12-10-2026 23:12"
+APP_VERSIE = "1.40 - 12-10-2026 23:24"
 
 
 @app.after_request
@@ -1447,6 +1447,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 .grid label{display:flex;flex-direction:column;font-size:13px;gap:4px}
 .card{background:#fff;padding:16px;border:1px solid #edebe9;border-radius:2px;margin-bottom:16px}
 .badge{padding:2px 8px;border-radius:10px;background:#edebe9;font-size:12px}
+table.een-regel th,table.een-regel td{white-space:nowrap}
 .row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
 .tabs{display:flex;gap:0;border-bottom:1px solid #edebe9;margin-bottom:16px}
 .tabs a{padding:10px 14px;color:#605e5c;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
@@ -1538,21 +1539,22 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   </select>
   <button>Zoeken</button>
 </form>
-<table>
-<tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Factuur</th></tr>
+<table class="een-regel">
+<tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
-  <td>{{ t['date']|nl_datum }}</td>
+  <td title="{{ t['date']|nl_datum }}">{{ (t['date']|nl_datum)[:10] }}</td>
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>
   <td>{{ t['los_plaats'] or '' }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
+  <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="8">Nog geen transporten gevonden.</td></tr>
+<tr><td colspan="9">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}""",

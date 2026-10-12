@@ -958,67 +958,84 @@ def export_relaties():
 
 # ---------- routes: gebruikers (alleen beheerder) ----------
 
+BEHEER_LIJSTEN = {
+    "afdelingen": {"tabel": "afdelingen", "kolom": "afdeling", "titel": "Afdeling (landen)",
+                   "uitleg": "Deze lijst zie je als keuzemenu bij Afdeling op het transportformulier."},
+    "laden_met": {"tabel": "laden_met_opties", "kolom": "laden_met", "titel": "Laden met",
+                  "uitleg": "Deze lijst zie je als keuzemenu bij Laden met op het transportformulier."},
+}
+
+
+def _lijst(sleutel):
+    if sleutel not in BEHEER_LIJSTEN:
+        abort(404)
+    return BEHEER_LIJSTEN[sleutel]
+
+
 @app.route("/beheer")
 @admin_required
 def beheer():
     db = get_db()
-    afdelingen = db.execute("SELECT naam FROM afdelingen ORDER BY naam").fetchall()
-    gebruik = {r["afdeling"]: r["n"] for r in db.execute(
-        "SELECT afdeling, COUNT(*) AS n FROM transports WHERE afdeling IS NOT NULL GROUP BY afdeling")}
-    laden_met = db.execute("SELECT naam FROM laden_met_opties ORDER BY naam").fetchall()
-    gebruik_lm = {r["laden_met"]: r["n"] for r in db.execute(
-        "SELECT laden_met, COUNT(*) AS n FROM transports WHERE laden_met IS NOT NULL GROUP BY laden_met")}
-    return render_template("beheer.html", afdelingen=afdelingen, gebruik=gebruik,
-                           laden_met=laden_met, gebruik_lm=gebruik_lm)
+    lijsten = []
+    for sleutel, info in BEHEER_LIJSTEN.items():
+        namen = [r["naam"] for r in db.execute(f"SELECT naam FROM {info['tabel']} ORDER BY naam")]
+        gebruik = {r["k"]: r["n"] for r in db.execute(
+            f"SELECT {info['kolom']} AS k, COUNT(*) AS n FROM transports "
+            f"WHERE {info['kolom']} IS NOT NULL GROUP BY {info['kolom']}")}
+        lijsten.append({"sleutel": sleutel, "titel": info["titel"], "uitleg": info["uitleg"],
+                        "namen": namen, "gebruik": gebruik})
+    return render_template("beheer.html", lijsten=lijsten)
 
 
-@app.route("/beheer/laden-met/nieuw", methods=["POST"])
+@app.route("/beheer/<sleutel>/nieuw", methods=["POST"])
 @admin_required
-def laden_met_new():
-    naam = request.form.get("naam", "").strip()
-    if not naam:
-        flash("Vul een omschrijving in.")
-    else:
-        db = get_db()
-        db.execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (naam,))
-        db.commit()
-        flash(f"'{naam}' toegevoegd.")
-    return redirect(url_for("beheer"))
-
-
-@app.route("/beheer/laden-met/verwijder", methods=["POST"])
-@admin_required
-def laden_met_delete():
-    naam = request.form.get("naam", "")
-    db = get_db()
-    db.execute("DELETE FROM laden_met_opties WHERE naam = ?", (naam,))
-    db.commit()
-    flash(f"'{naam}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
-    return redirect(url_for("beheer"))
-
-
-@app.route("/beheer/afdelingen/nieuw", methods=["POST"])
-@admin_required
-def afdeling_new():
+def beheer_nieuw(sleutel):
+    info = _lijst(sleutel)
     naam = request.form.get("naam", "").strip()
     if not naam:
         flash("Vul een naam in.")
     else:
         db = get_db()
-        db.execute("INSERT OR IGNORE INTO afdelingen (naam) VALUES (?)", (naam,))
+        db.execute(f"INSERT OR IGNORE INTO {info['tabel']} (naam) VALUES (?)", (naam,))
         db.commit()
         flash(f"'{naam}' toegevoegd.")
     return redirect(url_for("beheer"))
 
 
-@app.route("/beheer/afdelingen/verwijder", methods=["POST"])
+@app.route("/beheer/<sleutel>/wijzig", methods=["POST"])
 @admin_required
-def afdeling_delete():
-    naam = request.form.get("naam", "")
+def beheer_wijzig(sleutel):
+    info = _lijst(sleutel)
+    oud = request.form.get("oud", "")
+    nieuw = request.form.get("naam", "").strip()
     db = get_db()
-    db.execute("DELETE FROM afdelingen WHERE naam = ?", (naam,))
+    bestaat_oud = db.execute(f"SELECT 1 FROM {info['tabel']} WHERE naam = ?", (oud,)).fetchone()
+    if not bestaat_oud:
+        flash("Kies eerst een naam om te wijzigen.")
+    elif not nieuw:
+        flash("Vul de nieuwe naam in.")
+    elif nieuw == oud:
+        pass
+    elif db.execute(f"SELECT 1 FROM {info['tabel']} WHERE naam = ?", (nieuw,)).fetchone():
+        flash(f"'{nieuw}' staat al in de lijst.")
+    else:
+        db.execute(f"UPDATE {info['tabel']} SET naam = ? WHERE naam = ?", (nieuw, oud))
+        # transporten die deze waarde hebben, krijgen de nieuwe naam
+        db.execute(f"UPDATE transports SET {info['kolom']} = ? WHERE {info['kolom']} = ?", (nieuw, oud))
+        db.commit()
+        flash(f"'{oud}' is gewijzigd in '{nieuw}'. Transporten die dit gebruikten, zijn bijgewerkt.")
+    return redirect(url_for("beheer"))
+
+
+@app.route("/beheer/<sleutel>/verwijder", methods=["POST"])
+@admin_required
+def beheer_verwijder(sleutel):
+    _lijst(sleutel)
+    oud = request.form.get("oud", "")
+    db = get_db()
+    db.execute(f"DELETE FROM {_lijst(sleutel)['tabel']} WHERE naam = ?", (oud,))
     db.commit()
-    flash(f"'{naam}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
+    flash(f"'{oud}' verwijderd uit de lijst. Bestaande transporten houden hun waarde.")
     return redirect(url_for("beheer"))
 
 
@@ -1719,53 +1736,38 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 
 "beheer.html": """{% extends "base.html" %}{% block content %}
 <h2>Beheer</h2>
-<h3>Afdelingen (landen)</h3>
-<p>Deze lijst zie je als keuzemenu bij Afdeling op het transportformulier.</p>
-<form method="post" action="{{ url_for('afdeling_new') }}" class="row" style="margin-bottom:12px">
-  <input name="naam" placeholder="Nieuw land, bijvoorbeeld Italië" required style="max-width:320px">
-  <button>+ Toevoegen</button>
-</form>
-<table>
-<tr><th>Naam</th><th>Gebruikt bij transporten</th><th></th></tr>
-{% for a in afdelingen %}
-<tr>
-  <td>{{ a['naam'] }}</td>
-  <td>{{ gebruik.get(a['naam'], 0) }}</td>
-  <td>
-    <form method="post" action="{{ url_for('afdeling_delete') }}" onsubmit="return confirm('Verwijderen uit de lijst?')">
-      <input type="hidden" name="naam" value="{{ a['naam'] }}">
-      <button class="gevaar">Verwijderen</button>
-    </form>
-  </td>
-</tr>
-{% else %}
-<tr><td colspan="3">Nog geen afdelingen.</td></tr>
-{% endfor %}
-</table>
+{% for l in lijsten %}
+<div class="card" style="margin-bottom:24px">
+<h3>{{ l.titel }}</h3>
+<p>{{ l.uitleg }}</p>
 
-<h3>Laden met</h3>
-<p>Deze lijst zie je als keuzemenu bij Laden met op het transportformulier.</p>
-<form method="post" action="{{ url_for('laden_met_new') }}" class="row" style="margin-bottom:12px">
-  <input name="naam" placeholder="Nieuwe omschrijving" required style="max-width:320px">
+<form method="post" class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
+  <label>Kies</label>
+  <select name="oud" required style="max-width:320px">
+    <option value="">— kies een naam —</option>
+    {% for n in l.namen %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+  </select>
+  <input name="naam" placeholder="Nieuwe naam" style="max-width:320px">
+  <button formaction="{{ url_for('beheer_wijzig', sleutel=l.sleutel) }}">Wijzig</button>
+  <button class="gevaar" formaction="{{ url_for('beheer_verwijder', sleutel=l.sleutel) }}"
+          onclick="return confirm('Verwijderen uit de lijst?')">Verwijderen</button>
+</form>
+
+<form method="post" action="{{ url_for('beheer_nieuw', sleutel=l.sleutel) }}" class="row" style="margin-bottom:12px">
+  <input name="naam" placeholder="Nieuwe toevoegen" required style="max-width:320px">
   <button>+ Toevoegen</button>
 </form>
+
 <table>
-<tr><th>Omschrijving</th><th>Gebruikt bij transporten</th><th></th></tr>
-{% for a in laden_met %}
-<tr>
-  <td>{{ a['naam'] }}</td>
-  <td>{{ gebruik_lm.get(a['naam'], 0) }}</td>
-  <td>
-    <form method="post" action="{{ url_for('laden_met_delete') }}" onsubmit="return confirm('Verwijderen uit de lijst?')">
-      <input type="hidden" name="naam" value="{{ a['naam'] }}">
-      <button class="gevaar">Verwijderen</button>
-    </form>
-  </td>
-</tr>
+<tr><th>Naam</th><th>Gebruikt bij transporten</th></tr>
+{% for n in l.namen %}
+<tr><td>{{ n }}</td><td>{{ l.gebruik.get(n, 0) }}</td></tr>
 {% else %}
-<tr><td colspan="3">Nog geen omschrijvingen.</td></tr>
+<tr><td colspan="2">Nog niets in deze lijst.</td></tr>
 {% endfor %}
 </table>
+</div>
+{% endfor %}
 {% endblock %}""",
 
 "users.html": """{% extends "base.html" %}{% block content %}

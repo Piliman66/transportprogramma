@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.36 - 12-10-2026 23:02"
+APP_VERSIE = "1.38 - 12-10-2026 23:12"
 
 
 @app.after_request
@@ -1433,7 +1433,8 @@ table{width:100%;border-collapse:collapse;background:#fff}
 th,td{padding:8px;border-bottom:1px solid #edebe9;text-align:left;font-size:14px;vertical-align:top}
 th{font-weight:600;color:#605e5c;font-size:13px}
 tr:hover td{background:#f3f2f1}
-tr.nog-indelen td{background:#e9f7ec}
+.badge.nog-indelen{background:#f8d7da;color:#842029}
+.badge.ingedeeld{background:#c7ecd1;color:#0b4d1f}
 input,select,textarea{padding:6px 8px;border:1px solid #8a8886;border-radius:2px;font:inherit;width:100%;box-sizing:border-box;background:#fff;color:#323130}
 input:focus,select:focus,textarea:focus{outline:2px solid #0078d4;outline-offset:-1px;border-color:#0078d4}
 input[type=checkbox]{width:auto}
@@ -1540,10 +1541,10 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <table>
 <tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Factuur</th></tr>
 {% for t in rows %}
-<tr class="{{ 'nog-indelen' if t['status'] == 'nog indelen' else '' }}">
+<tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td>{{ t['date']|nl_datum }}</td>
-  <td><span class="badge">{{ t['status'] }}</span></td>
+  <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>
   <td>{{ t['los_plaats'] or '' }}</td>

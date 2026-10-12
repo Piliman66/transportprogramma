@@ -15,7 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
 
-STATUSES = ["gepland", "in het veld", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
+STATUSES = ["gepland", "nog indelen", "onderweg laden", "onderweg lossen", "afgeleverd", "geannuleerd"]
 # tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
 TIJD_OPTIES = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in (0, 15, 30, 45)
                if h * 60 + m <= 21 * 60]
@@ -73,7 +73,7 @@ TRANSPORT_FIELDS = [
     ("date", "Invoerdatum", "datetime"),
     ("status", "Status", "select"),
     ("status_tijd", "Tijdstip", "time"),
-    ("status_opmerking", "Opmerking status", "text"),
+    ("status_opmerking", "Tekst in het veld", "text"),
     ("customer_id", "Debiteur", "rel_opdrachtgever"),
     ("carrier_id", "Vervoerder", "rel_vervoerder"),
     ("afdeling", "Afdeling", "text"),
@@ -361,6 +361,11 @@ def parse_transport_form():
         data["receiver"] = loc["naam"] if loc else None
     if data["status"] not in STATUSES:
         errors.append("Ongeldige status.")
+    # tijdstip en tekst alleen bewaren bij de status waar ze bij horen
+    if data["status"] not in ("onderweg laden", "onderweg lossen"):
+        data["status_tijd"] = None
+    if data["status"] != "nog indelen":
+        data["status_opmerking"] = None
     if not data["customer_id"] or not data["los_locatie_id"]:
         errors.append("Opdrachtgever en losplaatscode zijn verplicht.")
     return data, errors
@@ -509,7 +514,7 @@ def transport_new():
         flash("Transport aangemaakt.")
         return redirect(url_for("transport_detail", tid=tid))
     defaults = {f: None for f in TRANSPORT_NAMES}
-    defaults.update(status="in het veld", invoice_status="niet gefactureerd",
+    defaults.update(status="nog indelen", invoice_status="niet gefactureerd",
                     date=datetime.now(ZoneInfo("Europe/Amsterdam")).strftime("%Y-%m-%d %H:%M"),
                     number=preview_transport_number())
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
@@ -1064,7 +1069,11 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     </select>
     <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
   </div>
-  {{ f('status_opmerking') }}
+  <span class="lbl">Tekst in het veld</span>
+  <div>
+    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}">
+    <span id="status_opm_dash" style="display:none;padding:8px">–</span>
+  </div>
 
   {{ f('invoice_status') }}
   {{ f('price') }}
@@ -1181,10 +1190,17 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     inp.style.display = on ? '' : 'none';
     inp.disabled = !on;  // uitgeschakelde velden worden niet opgeslagen
     document.getElementById('status_tijd_dash').style.display = on ? 'none' : '';
+    // tekst in het veld alleen bij status "nog indelen"; anders een "–"
+    const veld = byName('status').value === 'nog indelen';
+    const opm = document.getElementById('status_opm');
+    opm.style.display = veld ? '' : 'none';
+    opm.disabled = !veld;
+    document.getElementById('status_opm_dash').style.display = veld ? 'none' : '';
   }
-  // bij een andere status wordt het tijdstip leeggemaakt, zodat het opnieuw ingevuld moet worden
+  // bij een andere status worden tijdstip en tekst leeggemaakt, zodat ze opnieuw ingevuld moeten worden
   byName('status').addEventListener('change', () => {
     document.getElementById('status_tijd').value = '';
+    document.getElementById('status_opm').value = '';
     syncTijd();
   });
   syncTijd();

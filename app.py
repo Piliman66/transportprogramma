@@ -19,6 +19,9 @@ STATUSES = ["nog indelen", "ingedeeld", "onderweg laden", "onderweg lossen", "af
 # tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
 TIJD_OPTIES = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in (0, 15, 30, 45)
                if h * 60 + m <= 21 * 60]
+# laadtijd: van 00:00 tot 00:00 in stappen van 15 minuten (00 / 15 / 30 / 45)
+LAADTIJD_VAN_OPTIES = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+LAADTIJD_TOT_OPTIES = LAADTIJD_VAN_OPTIES + ["24:00"]
 INVOICE_STATUSES = ["niet gefactureerd", "gefactureerd", "betaald"]
 ROLES = ["beheerder", "medewerker"]
 
@@ -306,7 +309,8 @@ def current_user():
 @app.context_processor
 def inject_globals():
     return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN,
-            "TIJD_OPTIES": TIJD_OPTIES, "APP_VERSIE": APP_VERSIE}
+            "TIJD_OPTIES": TIJD_OPTIES, "APP_VERSIE": APP_VERSIE,
+            "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES}
 
 
 # laatste wijziging van dit bestand = moment waarop de nieuwste versie is gedeployd
@@ -1231,8 +1235,18 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
 
   <div class="tf-sec">Laden</div>
   {{ f('laad_datum') }}
-  {{ f('laad_tijd_van') }}
-  {{ f('laad_tijd_tot') }}
+  <span class="lbl">Laadtijd</span>
+  <div style="display:flex;gap:8px;align-items:center">
+    <select name="laad_tijd_van" aria-label="Laadtijd van">
+      <option value="">van…</option>
+      {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span>tot</span>
+    <select name="laad_tijd_tot" aria-label="Laadtijd tot">
+      <option value="">tot…</option>
+      {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+  </div>
   <span class="lbl">Openingstijden</span>
   <input id="l_openingstijden" readonly>
   <span class="lbl">Laadplaatscode</span>

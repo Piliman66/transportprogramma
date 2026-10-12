@@ -1198,8 +1198,10 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
   <div class="lad-head" style="grid-column:1/-1">
     <span class="lbl">Referentie</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
   </div>
+  {% set laatste = (regels|list|max) if regels else 0 %}
+  {% set openn = laatste if laatste > 1 else 1 %}
   {% for i in range(1, 6) %}{% set rr = regels.get(i, {}) %}
-  <details class="lad-det" style="grid-column:1/-1" {% if rr %}open{% endif %}>
+  <details class="lad-det" data-i="{{ i }}" style="grid-column:1/-1" {% if i <= openn %}open{% endif %}>
     <summary style="cursor:pointer;padding:6px 0">Laadnummer {{ i }}{% if not rr %} <em style="color:#888">(leeg)</em>{% endif %}</summary>
     <div class="lad-row">
       <input name="r{{ i }}_ref" value="{{ rr['ref'] or '' }}">
@@ -1301,6 +1303,18 @@ button,.btn{background:#1f3a5f;color:#fff;border:0;padding:8px 14px;border-radiu
     syncTijd();
   });
   syncTijd();
+  // laadregels: tot en met de laatste ingevulde regel open, de rest ingeklapt
+  function syncLad() {
+    let laatste = 0;
+    document.querySelectorAll('.lad-det').forEach(d => {
+      const filled = [...d.querySelectorAll('input')].some(el => el.value.trim() !== '');
+      if (filled) laatste = Math.max(laatste, +d.dataset.i);
+    });
+    const openn = Math.max(1, laatste);
+    document.querySelectorAll('.lad-det').forEach(d => { d.open = (+d.dataset.i) <= openn; });
+  }
+  document.querySelectorAll('.lad-row input').forEach(el => el.addEventListener('input', syncLad));
+  syncLad();
   byName('customer_id').addEventListener('change', showCustomer);
   byName('carrier_id').addEventListener('change', showCarrier);
   byName('laad_locatie_id').addEventListener('change', () => showLoc('laad_locatie_id', 'l_'));

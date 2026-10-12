@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.30 - 12-10-2026 22:12"
+APP_VERSIE = "1.32 - 12-10-2026 22:24"
 
 
 @app.after_request
@@ -459,10 +459,50 @@ def parse_relation_form():
     return data, errors
 
 
+# ---------- datums: opslag jjjj-mm-dd, weergave en invoer dd-mm-jjjj ----------
+
+DATUM_NAMES = {n for n, _, k in TRANSPORT_FIELDS if k in ("date", "datetime")}
+ISO_DATUM_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?")
+NL_DATUM_RE = re.compile(r"(\d{1,2})-(\d{1,2})-(\d{4})(?:[ T](\d{1,2}):(\d{2}))?")
+
+
+@app.template_filter("nl_datum")
+def nl_datum(waarde):
+    """Toont een opgeslagen datum (jjjj-mm-dd of jjjj-mm-dd uu:mm) als dd-mm-jjjj (uu:mm)."""
+    if not waarde:
+        return ""
+    m = ISO_DATUM_RE.fullmatch(str(waarde).strip())
+    if not m:
+        return str(waarde)
+    dag = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return f"{dag} {m.group(4)}:{m.group(5)}" if m.group(4) else dag
+
+
+def parse_nl_datum(raw):
+    """Zet ingevoerde dd-mm-jjjj (optioneel met uu:mm) om naar jjjj-mm-dd. None bij een ongeldige datum."""
+    m = NL_DATUM_RE.fullmatch(raw) or ISO_DATUM_RE.fullmatch(raw)
+    if not m:
+        return None
+    if m.re is NL_DATUM_RE:
+        dag, maand, jaar, uur, minuut = m.groups()
+    else:
+        jaar, maand, dag, uur, minuut = m.groups()
+    try:
+        datum = datetime(int(jaar), int(maand), int(dag))
+    except ValueError:
+        return None
+    if uur is None:
+        return f"{datum:%Y-%m-%d}"
+    if not (0 <= int(uur) <= 23 and 0 <= int(minuut) <= 59):
+        return None
+    return f"{datum:%Y-%m-%d} {int(uur):02d}:{minuut}"
+
+
 # ---------- hulpfuncties transporten ----------
 
 def parse_transport_form():
     data, errors = {}, []
+    labels = {n: l for n, l, _ in TRANSPORT_FIELDS}
     for name in TRANSPORT_NAMES:
         if name in BOOL_NAMES:
             data[name] = 1 if request.form.get(name) else 0
@@ -470,8 +510,13 @@ def parse_transport_form():
         raw = request.form.get(name, "").strip()
         if name in ("vehicle_plate", "oplegger"):
             raw = raw.upper()  # kenteken en oplegger altijd in hoofdletters
-        if name == "date":
-            raw = raw.replace("T", " ")  # datetime-local geeft 'YYYY-MM-DDTHH:MM'
+        if name in DATUM_NAMES:
+            data[name] = None
+            if raw:
+                data[name] = parse_nl_datum(raw)
+                if data[name] is None:
+                    errors.append(f"Ongeldige datum bij {labels[name]} (gebruik dd-mm-jjjj).")
+            continue
         if name in NUMERIC:
             try:
                 data[name] = NUMERIC[name](raw.replace(",", ".")) if raw else None
@@ -1157,7 +1202,16 @@ def export_transports():
     labels = {n: l for n, l, _ in TRANSPORT_FIELDS}
     headers = (["Nummer", "Debiteur code", "Debiteur", "Vervoerder code", "Vervoerder"]
                + [labels[k] for k in keys] + ["Aangemaakt", "Gewijzigd"])
-    return csv_response("transporten.csv", headers, [tuple(r) for r in rows])
+    def nl_rij(r):
+        # datums in dd-mm-jjjj, zodat ze in Excel in het Nederlands klopt
+        waarden = list(r)
+        for i, k in enumerate(keys):
+            if k in DATUM_NAMES:
+                waarden[5 + i] = nl_datum(waarden[5 + i])
+        waarden[-2:] = [nl_datum(w) for w in waarden[-2:]]
+        return tuple(waarden)
+
+    return csv_response("transporten.csv", headers, [nl_rij(r) for r in rows])
 
 
 @app.route("/export/relaties.csv")
@@ -1328,6 +1382,7 @@ table{width:100%;border-collapse:collapse;background:#fff}
 th,td{padding:8px;border-bottom:1px solid #edebe9;text-align:left;font-size:14px;vertical-align:top}
 th{font-weight:600;color:#605e5c;font-size:13px}
 tr:hover td{background:#f3f2f1}
+tr.nog-indelen td{background:#e9f7ec}
 input,select,textarea{padding:6px 8px;border:1px solid #8a8886;border-radius:2px;font:inherit;width:100%;box-sizing:border-box;background:#fff;color:#323130}
 input:focus,select:focus,textarea:focus{outline:2px solid #0078d4;outline-offset:-1px;border-color:#0078d4}
 input[type=checkbox]{width:auto}
@@ -1434,9 +1489,9 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <table>
 <tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Ontvanger</th><th>Vervoerder</th><th>Factuur</th></tr>
 {% for t in rows %}
-<tr>
+<tr class="{{ 'nog-indelen' if t['status'] == 'nog indelen' else '' }}">
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
-  <td>{{ t['date'] or '' }}</td>
+  <td>{{ t['date']|nl_datum }}</td>
   <td><span class="badge">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
   <td>{{ t['receiver'] or '' }}</td>
@@ -1493,14 +1548,13 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     </select>
     <input type="hidden" name="nieuwe_laden_met" id="nieuwe_laden_met" value="">
   {% else %}
-    {% if F[name][1] == 'datetime' %}
-      {% set v = (t[name] or '')|replace(' ', 'T') %}
-      {% if v|length == 10 %}{% set v = v ~ 'T00:00' %}{% endif %}
+    {% if F[name][1] in ('date', 'datetime') %}
+      {% set v = t[name]|nl_datum %}
     {% else %}
       {% set v = t[name] if t[name] is not none else '' %}
     {% endif %}
-    <input type="{{ 'datetime-local' if F[name][1] == 'datetime' else ('date' if F[name][1] == 'date' else ('time' if F[name][1] == 'time' else 'text')) }}" name="{{ name }}" class="{{ 'span3' if span }}"
-           value="{{ v }}"{% if name in ('vehicle_plate', 'oplegger') %} style="text-transform:uppercase"{% endif %}>
+    <input type="{{ 'time' if F[name][1] == 'time' else 'text' }}" name="{{ name }}" class="{{ 'span3' if span }}"
+           value="{{ v }}"{% if F[name][1] == 'datetime' %} placeholder="dd-mm-jjjj uu:mm"{% elif F[name][1] == 'date' %} placeholder="dd-mm-jjjj"{% endif %}{% if F[name][1] in ('date', 'datetime') %} inputmode="numeric"{% endif %}{% if name in ('vehicle_plate', 'oplegger') %} style="text-transform:uppercase"{% endif %}>
   {% endif %}
 {% endmacro %}
 {% macro f(name, span=False) %}<span class="lbl">{{ F[name][0] }}</span>{{ ctl(name, span) }}{% endmacro %}
@@ -1937,7 +1991,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
     {% set r = related[name] %}
     <tr><th style="width:220px">{{ label }}</th><td>{% if r %}{% if kind == 'rel_locatie' %}{{ r['code'] }} – {{ r['name'] }}{% else %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }} – {{ r['name'] }}</a>{% endif %}{% else %}-{% endif %}</td></tr>
   {% else %}
-    <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name] if t[name] is not none else '') }}</td></tr>
+    <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name]|nl_datum if kind in ('date', 'datetime') else (t[name] if t[name] is not none else '')) }}</td></tr>
   {% endif %}
   {% endfor %}
   {% if regels %}
@@ -2148,7 +2202,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   <h3 style="margin-top:0">Transporten</h3>
   <table>
     {% for t in used %}
-    <tr><td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td><td>{{ t['date'] or '' }}</td><td>{{ t['status'] }}</td></tr>
+    <tr><td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td><td>{{ t['date']|nl_datum }}</td><td>{{ t['status'] }}</td></tr>
     {% else %}
     <tr><td>Nog geen transporten.</td></tr>
     {% endfor %}

@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import re
 import secrets
 import sqlite3
 from datetime import datetime
@@ -284,6 +285,9 @@ def init_db():
     # oude status 'onderweg' is nu 'onderweg laden'
     db.execute("UPDATE transports SET status = 'onderweg laden' WHERE status = 'onderweg'")
     db.execute("UPDATE transports SET status = 'ingedeeld' WHERE status = 'gepland'")
+    # relatiecodes van 5 naar 4 cijfers (V00001 -> V0001); het nummer blijft gelijk, dus geen dubbele codes
+    db.execute("UPDATE relaties SET code = substr(code, 1, 1) || printf('%04d', CAST(substr(code, 2) AS INTEGER)) "
+               "WHERE length(code) = 6")
     # nieuwe locatievelden toevoegen aan bestaande databases
     have_loc = {r[1] for r in db.execute("PRAGMA table_info(locaties)")}
     for name, _, kind in LOC_FIELDS:
@@ -327,7 +331,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.13 - 12-10-2026 15:00"
+APP_VERSIE = "1.17 - 12-10-2026 16:50"
 
 
 @app.after_request
@@ -362,12 +366,19 @@ def admin_required(f):
 # ---------- relaties ----------
 
 def next_relation_code(soort):
-    """Geeft de volgende relatiecode, bv. V00001 of D00001, per soort."""
+    """Geeft de volgende relatiecode, bv. V0001 of D0001, per soort (4 cijfers)."""
     db = get_db()
     db.execute("INSERT INTO counters (soort, n) VALUES (?, 0) ON CONFLICT(soort) DO NOTHING", (soort,))
-    db.execute("UPDATE counters SET n = n + 1 WHERE soort = ?", (soort,))
+    voorletter = SOORTEN[soort][0]
     n = db.execute("SELECT n FROM counters WHERE soort = ?", (soort,)).fetchone()["n"]
-    return f"{SOORTEN[soort][0]}{n:05d}"
+    # het volgende vrije nummer tussen 0001 en 9999; na 9999 begint het weer bij 0001
+    for _ in range(9999):
+        n = n + 1 if n < 9999 else 1
+        code = f"{voorletter}{n:04d}"
+        if not db.execute("SELECT 1 FROM relaties WHERE code = ?", (code,)).fetchone():
+            db.execute("UPDATE counters SET n = ? WHERE soort = ?", (n, soort))
+            return code
+    raise RuntimeError("Geen vrije relatiecode meer beschikbaar.")
 
 
 def verwerk_email_planning(waarde):
@@ -842,6 +853,86 @@ def relatie_new(soort):
         return redirect(url_for("relatie_detail", rid=cur.lastrowid))
     return render_template("relatie_form.html", c={n: None for n in RELATION_NAMES},
                            title=f"Nieuwe {label.lower()}", action=action, fields=velden_voor(soort))
+
+
+RELATIE_IMPORT_KOLOMMEN = {
+    "Relatie": "code", "Naam": "name", "Zoektekst": "zoektekst", "Pst.postcd": "visit_postcode",
+    "Pst.plaats": "visit_city", "Regio": "regio", "Telefoon": "telefoon", "Fax": "fax", "Taal": "taal",
+}
+
+
+def importeer_relaties(bestand):
+    """Leest een Excel-export van relaties. V-codes worden vervoerders, D-codes opdrachtgevers.
+    Geeft (aantallen per soort, overgeslagen per reden) terug."""
+    import openpyxl  # alleen nodig bij importeren
+    wb = openpyxl.load_workbook(bestand, read_only=True, data_only=True)
+    rijen = wb.worksheets[0].iter_rows(values_only=True)
+    hdr = next(rijen)
+    kol = {RELATIE_IMPORT_KOLOMMEN[h]: i for i, h in enumerate(hdr) if h in RELATIE_IMPORT_KOLOMMEN}
+    if "code" not in kol or "name" not in kol:
+        raise ValueError("De kolommen 'Relatie' en 'Naam' ontbreken in het bestand.")
+    db = get_db()
+    bestaand = {r["code"] for r in db.execute("SELECT code FROM relaties")}
+    soorten = {"V": "vervoerder", "W": "vervoerder", "D": "opdrachtgever"}
+    teller = {"vervoerder": 0, "opdrachtgever": 0}
+    maxn = {"vervoerder": 0, "opdrachtgever": 0}
+    overgeslagen = {"andere code (niet V, W of D)": 0, "geen naam": 0, "bestaat al": 0}
+    for rij in rijen:
+        def waarde(veld):
+            i = kol.get(veld)
+            if i is None or i >= len(rij) or rij[i] is None:
+                return None
+            tekst = str(rij[i]).strip()
+            return tekst or None
+        code = (waarde("code") or "").upper()
+        if not re.fullmatch(r"[VWD]\d{4}", code):
+            overgeslagen["andere code (niet V, W of D)"] += 1
+            continue
+        naam = waarde("name")
+        if not naam:
+            overgeslagen["geen naam"] += 1
+            continue
+        if code in bestaand:
+            overgeslagen["bestaat al"] += 1
+            continue
+        bestaand.add(code)
+        soort = soorten[code[0]]
+        vals = {"soort": soort, "code": code, "name": naam}
+        for veld in ("zoektekst", "visit_postcode", "visit_city", "regio", "telefoon", "fax", "taal"):
+            vals[veld] = waarde(veld)
+        if not vals["zoektekst"]:
+            vals["zoektekst"] = naam.upper()[:30]
+        db.execute(f"INSERT INTO relaties ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",
+                   list(vals.values()))
+        teller[soort] += 1
+        if code[0] in ("V", "D"):  # de teller volgt alleen de V- en D-codes die wij zelf uitgeven
+            maxn[soort] = max(maxn[soort], int(code[1:]))
+    # de teller voor nieuwe codes loopt door vanaf de hoogste geïmporteerde code
+    for soort, n in maxn.items():
+        if n:
+            db.execute("INSERT INTO counters (soort, n) VALUES (?, ?) ON CONFLICT(soort) "
+                       "DO UPDATE SET n = MAX(n, excluded.n)", (soort, n))
+    db.commit()
+    return teller, overgeslagen
+
+
+@app.route("/relaties/importeren", methods=["GET", "POST"])
+@admin_required
+def relaties_importeren():
+    if request.method == "POST":
+        bestand = request.files.get("bestand")
+        if not bestand or not bestand.filename.lower().endswith(".xlsx"):
+            flash("Kies een Excel-bestand (.xlsx).")
+            return redirect(url_for("relaties_importeren"))
+        try:
+            teller, overgeslagen = importeer_relaties(bestand)
+        except ValueError as e:
+            flash(str(e))
+            return redirect(url_for("relaties_importeren"))
+        flash(f"Geïmporteerd: {teller['vervoerder']} vervoerders en {teller['opdrachtgever']} opdrachtgevers. "
+              f"Overgeslagen: " + ", ".join(f"{v} {k}" for k, v in overgeslagen.items() if v) + ".")
+        return redirect(url_for("relaties"))
+    return render_template("relaties_import.html")
 
 
 @app.route("/relaties/<int:rid>")
@@ -1765,6 +1856,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   {% else %}
     <a class="btn" href="{{ url_for('relatie_new', soort='vervoerder') }}">+ Nieuwe vervoerder</a>
     <a class="btn" href="{{ url_for('relatie_new', soort='opdrachtgever') }}">+ Nieuwe opdrachtgever</a>
+    {% if user['role'] == 'beheerder' %}<a class="btn" href="{{ url_for('relaties_importeren') }}">Importeren uit Excel</a>{% endif %}
   {% endif %}
   </div>
 </div>
@@ -1787,6 +1879,22 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 <tr><td colspan="5">Nog niets gevonden.</td></tr>
 {% endfor %}
 </table>
+{% endblock %}""",
+
+"relaties_import.html": """{% extends "base.html" %}{% block content %}
+<h2>Relaties importeren uit Excel</h2>
+<div class="card">
+<p>Kies het Excel-bestand (.xlsx) met de relaties uit het oude systeem.</p>
+<ul>
+<li>Codes die met V of W beginnen worden vervoerders; codes die met D beginnen worden opdrachtgevers.</li>
+<li>Andere codes (zoals L) worden niet geïmporteerd.</li>
+<li>Relaties waarvan de code al bestaat, worden overgeslagen.</li>
+</ul>
+<form method="post" enctype="multipart/form-data" class="row">
+  <input type="file" name="bestand" accept=".xlsx" required style="max-width:420px">
+  <button>Importeren</button>
+</form>
+</div>
 {% endblock %}""",
 
 "relatie_form.html": """{% extends "base.html" %}{% block content %}

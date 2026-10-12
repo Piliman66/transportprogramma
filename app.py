@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.24 - 12-10-2026 21:14"
+APP_VERSIE = "1.26 - 12-10-2026 21:34"
 
 
 @app.after_request
@@ -609,11 +609,24 @@ def update_transport(t, data, user_id):
 
 def render_form(t, title, action):
     db = get_db()
+    deb_rijen = db.execute(
+        "SELECT id, code, name, visit_postcode, visit_city, btw_nummer FROM relaties "
+        "WHERE soort = 'opdrachtgever' ORDER BY name").fetchall()
+    vrv_rijen = db.execute(
+        "SELECT id, code, name, visit_postcode, visit_city, btw_nummer FROM relaties "
+        "WHERE soort = 'vervoerder' ORDER BY name").fetchall()
+
+    def zoek_json(rijen):
+        # gegevens voor het zoekvenster in het transportformulier: naam, plaats en BTW nummer
+        return [{"id": r["id"], "code": r["code"], "name": r["name"] or "",
+                 "plaats": ((r["visit_postcode"] or "") + " " + (r["visit_city"] or "")).strip(),
+                 "btw": r["btw_nummer"] or ""} for r in rijen]
+
     relations = {
-        "rel_opdrachtgever": db.execute(
-            "SELECT id, code, name FROM relaties WHERE soort = 'opdrachtgever' ORDER BY name").fetchall(),
-        "rel_vervoerder": db.execute(
-            "SELECT id, code, name FROM relaties WHERE soort = 'vervoerder' ORDER BY name").fetchall(),
+        "rel_opdrachtgever": deb_rijen,
+        "rel_vervoerder": vrv_rijen,
+        "deb_json": zoek_json(deb_rijen),
+        "vrv_json": zoek_json(vrv_rijen),
     }
     # gegevens per relatie, voor automatisch invullen van de velden in het formulier
     rels = {str(r["id"]): {k: (r[k] if r[k] is not None else "") for k in r.keys()}
@@ -1486,10 +1499,13 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   {{ f('referentie') }}
 
   <span class="lbl">Debiteur</span>
-  <select name="customer_id">
-    <option value="">— kies een debiteur —</option>
-    {% for r in relations['rel_opdrachtgever'] %}<option value="{{ r['id'] }}" {% if t['customer_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
-  </select>
+  <div style="display:flex;gap:6px">
+    <select name="customer_id" style="flex:1">
+      <option value="">— kies een debiteur —</option>
+      {% for r in relations['rel_opdrachtgever'] %}<option value="{{ r['id'] }}" {% if t['customer_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
+    </select>
+    <button type="button" onclick="openRelZoek('customer_id')">Zoeken…</button>
+  </div>
   <span class="lbl">Naam debiteur</span>
   <input id="c_name" readonly>
 
@@ -1509,10 +1525,13 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
   </details>
 
   <span class="lbl">Vervoerder</span>
-  <select name="carrier_id">
-    <option value="">— kies een vervoerder —</option>
-    {% for r in relations['rel_vervoerder'] %}<option value="{{ r['id'] }}" {% if t['carrier_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
-  </select>
+  <div style="display:flex;gap:6px">
+    <select name="carrier_id" style="flex:1">
+      <option value="">— kies een vervoerder —</option>
+      {% for r in relations['rel_vervoerder'] %}<option value="{{ r['id'] }}" {% if t['carrier_id'] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
+    </select>
+    <button type="button" onclick="openRelZoek('carrier_id')">Zoeken…</button>
+  </div>
   <span class="lbl">Naam vervoerder</span>
   <input id="v_name" readonly>
   {{ f('email_planning') }}
@@ -1645,9 +1664,77 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 </div>
 <p><button>Opslaan</button> <a href="{{ url_for('transports') }}">Annuleren</a></p>
 </form>
+<dialog id="dlg_deb" style="width:min(640px,92vw);border:none;border-radius:8px;padding:20px">
+  <h3 id="deb_titel" style="margin-top:0">Debiteur zoeken</h3>
+  <div style="display:grid;gap:8px">
+    <input id="deb_naam" placeholder="Naam" oninput="zoekDeb()">
+    <input id="deb_plaats" placeholder="Plaats" oninput="zoekDeb()">
+    <input id="deb_btw" placeholder="BTW nummer" oninput="zoekDeb()">
+  </div>
+  <div id="deb_res" style="max-height:340px;overflow:auto;margin-top:10px"></div>
+  <p style="text-align:right;margin-bottom:0"><button type="button" onclick="document.getElementById('dlg_deb').close()">Annuleren</button></p>
+</dialog>
 <script>
   // gegevens per relatie; velden met een relatie worden automatisch gevuld
   const REL = {{ rels|tojson }};
+  // zoeklijsten per keuzeveld: debiteuren en vervoerders (naam, plaats en BTW nummer)
+  const ZOEK = {
+    customer_id: {titel: 'Debiteur zoeken', lijst: {{ relations['deb_json']|tojson }}},
+    carrier_id: {titel: 'Vervoerder zoeken', lijst: {{ relations['vrv_json']|tojson }}}
+  };
+  let zoekVeld = 'customer_id';
+  function openRelZoek(veld) {
+    zoekVeld = veld;
+    document.getElementById('deb_titel').textContent = ZOEK[veld].titel;
+    zoekDeb();
+    document.getElementById('dlg_deb').showModal();
+    document.getElementById('deb_naam').focus();
+  }
+  function zoekDeb() {
+    const n = document.getElementById('deb_naam').value.trim().toLowerCase();
+    const p = document.getElementById('deb_plaats').value.trim().toLowerCase();
+    const b = document.getElementById('deb_btw').value.trim().toLowerCase();
+    const box = document.getElementById('deb_res');
+    box.innerHTML = '';
+    if (!n && !p && !b) {
+      box.textContent = 'Typ een naam, plaats of BTW nummer om te zoeken.';
+      return;
+    }
+    const gevonden = ZOEK[zoekVeld].lijst.filter(r =>
+      (!n || r.name.toLowerCase().includes(n)) &&
+      (!p || r.plaats.toLowerCase().includes(p)) &&
+      (!b || r.btw.toLowerCase().includes(b)));
+    if (!gevonden.length) {
+      box.textContent = 'Geen debiteuren gevonden.';
+      return;
+    }
+    gevonden.slice(0, 200).forEach(r => {
+      const knop = document.createElement('button');
+      knop.type = 'button';
+      knop.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:4px';
+      const regel1 = document.createElement('strong');
+      regel1.textContent = r.code + ' – ' + r.name;
+      const regel2 = document.createElement('div');
+      regel2.style.cssText = 'font-size:12px;color:#605e5c';
+      regel2.textContent = [r.plaats, r.btw].filter(Boolean).join(' · ');
+      knop.appendChild(regel1);
+      knop.appendChild(regel2);
+      knop.addEventListener('click', () => kiesDeb(r.id));
+      box.appendChild(knop);
+    });
+    if (gevonden.length > 200) {
+      const meer = document.createElement('div');
+      meer.style.cssText = 'font-size:12px;color:#605e5c;padding:4px';
+      meer.textContent = 'Eerste 200 van ' + gevonden.length + ' resultaten; verfijn je zoekopdracht.';
+      box.appendChild(meer);
+    }
+  }
+  function kiesDeb(id) {
+    const sel = byName(zoekVeld);
+    sel.value = String(id);
+    sel.dispatchEvent(new Event('change'));
+    document.getElementById('dlg_deb').close();
+  }
   const byName = (n) => document.querySelector('[name="' + n + '"]');
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
   function showCustomer() {

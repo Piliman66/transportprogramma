@@ -262,17 +262,17 @@ LOC_FIELDS = [
 
 # landcodes voor Beheer: (land, omschrijving, landnummer); het landnummer is leeg als het niet bekend is
 LANDCODES = [
-    ("A", "Oostenrijk", "0043"), ("AL", "Albanië", "00355"), ("BE", "België", "0032"),
+    ("AT", "Oostenrijk", "0043"), ("AL", "Albanië", "00355"), ("BE", "België", "0032"),
     ("BG", "Bulgarije", "00359"), ("BIH", "Bosnië-Herzegovina", "00387"),
     ("BY", "Wit-Rusland", "00375"), ("CH", "Zwitserland", "0041"), ("CS", "Servië Montenegro", "00381"),
-    ("CY", "Cyprus", "00357"), ("CZ", "Tsjechië", "00420"), ("D", "Duitsland", "0049"),
-    ("DK", "Denemarken", "0045"), ("E", "Spanje", "0034"), ("EE", "Estland", "00372"),
-    ("F", "Frankrijk", "0033"), ("FI", "Finland", "00358"), ("GB", "Verenigd Koninkrijk", "0044"),
-    ("GR", "Griekenland", "0030"), ("H", "Hongarije", "0036"), ("HR", "Kroatië", "00385"),
-    ("I", "Italië", "0039"), ("IR", "Ierland", "00353"), ("L", "Luxemburg", "00352"),
+    ("CY", "Cyprus", "00357"), ("CZ", "Tsjechië", "00420"), ("DE", "Duitsland", "0049"),
+    ("DK", "Denemarken", "0045"), ("ES", "Spanje", "0034"), ("EE", "Estland", "00372"),
+    ("FR", "Frankrijk", "0033"), ("FI", "Finland", "00358"), ("GB", "Verenigd Koninkrijk", "0044"),
+    ("GR", "Griekenland", "0030"), ("HU", "Hongarije", "0036"), ("HR", "Kroatië", "00385"),
+    ("IT", "Italië", "0039"), ("IR", "Ierland", "00353"), ("LU", "Luxemburg", "00352"),
     ("LT", "Litouwen", "00370"), ("LV", "Letland", "00371"), ("MD", "Moldavië", "00373"),
     ("ME", "Montenegro", "00382"), ("MK", "Macedonië", "00389"), ("NL", "Nederland", "0031"),
-    ("NO", "Noorwegen", "0047"), ("P", "Portugal", "00351"), ("PL", "Polen", "0048"),
+    ("NO", "Noorwegen", "0047"), ("PT", "Portugal", "00351"), ("PL", "Polen", "0048"),
     ("RO", "Roemenië", "0040"), ("RS", "Servië", "00381"), ("SE", "Zweden", "0046"),
     ("SK", "Slowakije", "00421"), ("SL", "Slovenië", "00386"), ("TR", "Turkije", "90"),
     ("UA", "Oekraïne", "00380"), ("YU", "Joegoslavië", "00381"),
@@ -296,6 +296,14 @@ def init_db():
                        (f"{code} – {omschr}" + (f" ({nr})" if nr else ""), code + " – %"))
         db.execute("DELETE FROM landcodes WHERE naam = 'BU – Bulgarije'")  # dubbel van BG
         db.execute("PRAGMA user_version = 2")
+    # versie 3: landcodes met twee letters (D wordt DE); ook de landcode op de relaties meeverhuizen
+    if db.execute("PRAGMA user_version").fetchone()[0] < 3:
+        for oud, nieuw in [("A", "AT"), ("D", "DE"), ("E", "ES"), ("F", "FR"), ("H", "HU"),
+                           ("I", "IT"), ("L", "LU"), ("P", "PT")]:
+            db.execute("UPDATE landcodes SET naam = ? || substr(naam, ?) WHERE naam LIKE ?",
+                       (nieuw, len(oud) + 1, oud + " – %"))
+            db.execute("UPDATE relaties SET landcode = ? WHERE landcode = ?", (nieuw, oud))
+        db.execute("PRAGMA user_version = 3")
     # nieuwe transportvelden toevoegen aan bestaande databases
     have = {r[1] for r in db.execute("PRAGMA table_info(transports)")}
     for name, _, kind in TRANSPORT_FIELDS:
@@ -375,7 +383,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.58 - 13-10-2026 22:00"
+APP_VERSIE = "1.59 - 13-10-2026 22:12"
 
 
 @app.after_request

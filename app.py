@@ -400,7 +400,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.68 - 13-10-2026 23:40"
+APP_VERSIE = "1.70 - 13-10-2026 23:55"
 
 
 @app.after_request
@@ -837,8 +837,8 @@ def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
-           "ll.plaats AS laad_plaats, ll.postcode AS laad_postcode, "
-           "lo.plaats AS los_plaats, lo.postcode AS los_postcode FROM transports t "
+           "ll.land AS laad_land, ll.postcode AS laad_postcode, ll.plaats AS laad_plaats, "
+           "lo.land AS los_land, lo.postcode AS los_postcode, lo.plaats AS los_plaats FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
            "LEFT JOIN relaties c ON c.id = t.carrier_id "
            "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
@@ -864,7 +864,7 @@ def transports():
                            kolom_standaard=kolom_standaard())
 
 
-OVERZICHT_KOLOMMEN = 13  # aantal kolommen in het overzicht Transporten
+OVERZICHT_KOLOMMEN = 11  # aantal kolommen in het overzicht Transporten
 
 
 def kolom_standaard():
@@ -1495,15 +1495,21 @@ def locatie_edit(lid):
     action = url_for("locatie_edit", lid=lid)
     if request.method == "POST":
         data, errors = parse_location_form()
+        code = request.form.get("code", "").strip()
+        data["code"] = code
+        if not code:
+            errors.append("Code is verplicht.")
+        elif db.execute("SELECT 1 FROM locaties WHERE code = ? AND id <> ?", (code, lid)).fetchone():
+            errors.append(f"De code {code} bestaat al.")
         if errors:
             for e in errors:
                 flash(e)
             return render_template("locatie_form.html", c=data, title=f"Bewerk {c['code']}",
-                                   action=action, fields=LOC_FIELDS,
+                                   action=action, fields=LOC_FIELDS, code_veld=True, lid=lid,
                                    gekozen=gekozen_relaties(data["relatie_ids"]))
         sets = ", ".join(f"{n} = ?" for n in LOC_NAMES)
-        db.execute(f"UPDATE locaties SET {sets} WHERE id = ?",
-                   [data[n] for n in LOC_NAMES] + [lid])
+        db.execute(f"UPDATE locaties SET code = ?, {sets} WHERE id = ?",
+                   [code] + [data[n] for n in LOC_NAMES] + [lid])
         zet_locatie_relaties(db, lid, data["relatie_ids"])
         db.commit()
         flash("Locatie opgeslagen.")
@@ -1511,7 +1517,8 @@ def locatie_edit(lid):
     huidig = [r["id"] for r in db.execute(
         "SELECT relatie_id AS id FROM locatie_relaties WHERE locatie_id = ?", (lid,))]
     return render_template("locatie_form.html", c=c, title=f"Bewerk {c['code']}",
-                           action=action, fields=LOC_FIELDS, gekozen=gekozen_relaties(huidig))
+                           action=action, fields=LOC_FIELDS, code_veld=True, lid=lid,
+                           gekozen=gekozen_relaties(huidig))
 
 
 # landcode uit het voorvoegsel van de postcode in het bestand (bijvoorbeeld D-85748 of NL-7461)
@@ -1900,7 +1907,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <button>Zoeken</button>
 </form>
 <table class="een-regel">
-<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Postcode laden</th><th>Losplaats</th><th>Postcode lossen</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
+<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
@@ -1909,16 +1916,14 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
   <td>{{ t['referentie'] or '' }}</td>
-  <td>{{ t['laad_plaats'] or '' }}</td>
-  <td>{{ t['laad_postcode'] or '' }}</td>
-  <td>{{ t['los_plaats'] or '' }}</td>
-  <td>{{ t['los_postcode'] or '' }}</td>
+  <td>{{ [t['laad_land'], t['laad_postcode'], t['laad_plaats']]|select|join(' | ') }}</td>
+  <td>{{ [t['los_land'], t['los_postcode'], t['los_plaats']]|select|join(' | ') }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="13">Nog geen transporten gevonden.</td></tr>
+<tr><td colspan="11">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
 <dialog id="dlg_datum" style="border:none;border-radius:8px;padding:16px;width:min(340px,92vw)">
@@ -3113,7 +3118,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     </span>
   </th>
 {% endfor %}
-<th></th></tr>
+</tr>
 {% for l in rows %}
 <tr>
   <td>{{ l['code'] }}</td>
@@ -3122,14 +3127,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td>{{ l['plaats'] or '' }}</td>
   <td>{{ l['land'] or '' }}</td>
   <td style="white-space:pre-line">{{ l['openingstijden'] or '' }}</td>
-  <td>{% if user['role'] == 'beheerder' %}
-    <form method="post" action="{{ url_for('locatie_delete', lid=l['id']) }}" onsubmit="return confirm('Locatie verwijderen?')">
-      <button class="gevaar">Verwijderen</button>
-    </form>
-  {% endif %}</td>
 </tr>
 {% else %}
-<tr><td colspan="7">Nog geen locaties.</td></tr>
+<tr><td colspan="6">Nog geen locaties.</td></tr>
 {% endfor %}
 </table>
 {% endblock %}""",
@@ -3138,6 +3138,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <h2>{{ title }}</h2>
 <form method="post" action="{{ action }}" class="card" style="padding:0;overflow:hidden">
   <table class="form-table">
+  {% if code_veld %}
+    <tr>
+      <th>Code</th>
+      <td><input type="text" name="code" value="{{ c['code'] or '' }}" required style="max-width:200px"></td>
+    </tr>
+  {% endif %}
   {% for name, label, kind in fields %}
     <tr>
       <th>{{ label }}</th>
@@ -3171,6 +3177,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </table>
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('locaties') }}">Annuleren</a></p>
 </form>
+{% if lid is defined and user['role'] == 'beheerder' %}
+<form method="post" action="{{ url_for('locatie_delete', lid=lid) }}" onsubmit="return confirm('Locatie verwijderen?')" style="margin-top:12px">
+  <button class="gevaar">Locatie verwijderen</button>
+</form>
+{% endif %}
 <script>
 const LR_CHIP_STIJL = 'display:inline-flex;align-items:center;gap:4px;background:#e1dfdd;border-radius:12px;padding:2px 4px 2px 10px';
 let lrTimer = null;

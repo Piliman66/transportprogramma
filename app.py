@@ -40,6 +40,7 @@ RELATION_FIELDS = [
     ("visit_city", "Bezoekadres plaats", "text"),
     ("visit_adres", "Bezoekadres straat en nummer", "text"),
     ("visit_country", "Bezoekadres land", "text"),
+    ("landcode", "Landcode", "landcode"),
     ("regio", "Regio", "text"),
     ("telefoon", "Telefoon", "text"),
     ("telefoon_bh", "Telefoon bh", "text"),
@@ -259,11 +260,42 @@ LOC_FIELDS = [
 ]
 
 
+# landcodes voor Beheer: (land, omschrijving, landnummer); het landnummer is leeg als het niet bekend is
+LANDCODES = [
+    ("A", "Oostenrijk", "0043"), ("AL", "Albanië", "00355"), ("BE", "België", "0032"),
+    ("BG", "Bulgarije", "00359"), ("BIH", "Bosnië-Herzegovina", "00387"),
+    ("BY", "Wit-Rusland", "00375"), ("CH", "Zwitserland", "0041"), ("CS", "Servië Montenegro", "00381"),
+    ("CY", "Cyprus", "00357"), ("CZ", "Tsjechië", "00420"), ("D", "Duitsland", "0049"),
+    ("DK", "Denemarken", "0045"), ("E", "Spanje", "0034"), ("EE", "Estland", "00372"),
+    ("F", "Frankrijk", "0033"), ("FI", "Finland", "00358"), ("GB", "Verenigd Koninkrijk", "0044"),
+    ("GR", "Griekenland", "0030"), ("H", "Hongarije", "0036"), ("HR", "Kroatië", "00385"),
+    ("I", "Italië", "0039"), ("IR", "Ierland", "00353"), ("L", "Luxemburg", "00352"),
+    ("LT", "Litouwen", "00370"), ("LV", "Letland", "00371"), ("MD", "Moldavië", "00373"),
+    ("ME", "Montenegro", "00382"), ("MK", "Macedonië", "00389"), ("NL", "Nederland", "0031"),
+    ("NO", "Noorwegen", "0047"), ("P", "Portugal", "00351"), ("PL", "Polen", "0048"),
+    ("RO", "Roemenië", "0040"), ("RS", "Servië", "00381"), ("SE", "Zweden", "0046"),
+    ("SK", "Slowakije", "00421"), ("SL", "Slovenië", "00386"), ("TR", "Turkije", "90"),
+    ("UA", "Oekraïne", "00380"), ("YU", "Joegoslavië", "00381"),
+]
+
+
 def init_db():
     """Maakt tabellen aan. Maakt een beheerder aan als er nog geen gebruikers zijn
     en de omgevingsvariabele ADMIN_PASSWORD is gezet."""
     db = sqlite3.connect(DB_PATH)
     db.executescript(SCHEMA)
+    # lijst met landcodes voor Beheer: eenmalig gevuld bij het aanmaken, daarna beheer je de lijst zelf
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'landcodes'").fetchone():
+        db.execute("CREATE TABLE landcodes (naam TEXT PRIMARY KEY)")
+        db.executemany("INSERT OR IGNORE INTO landcodes (naam) VALUES (?)",
+                       [(f"{code} – {omschr}" + (f" ({nr})" if nr else ""),) for code, omschr, nr in LANDCODES])
+    # eenmalige correctie van de landcodes (namen en landnummers), zodat een bestaande lijst meegaat
+    if db.execute("PRAGMA user_version").fetchone()[0] < 2:
+        for code, omschr, nr in LANDCODES:
+            db.execute("UPDATE landcodes SET naam = ? WHERE naam LIKE ?",
+                       (f"{code} – {omschr}" + (f" ({nr})" if nr else ""), code + " – %"))
+        db.execute("DELETE FROM landcodes WHERE naam = 'BU – Bulgarije'")  # dubbel van BG
+        db.execute("PRAGMA user_version = 2")
     # nieuwe transportvelden toevoegen aan bestaande databases
     have = {r[1] for r in db.execute("PRAGMA table_info(transports)")}
     for name, _, kind in TRANSPORT_FIELDS:
@@ -289,6 +321,8 @@ def init_db():
     db.execute("UPDATE transports SET status = 'ingedeeld' WHERE status = 'gepland'")
     # status 'geannuleerd' is nu 'afmelden'
     db.execute("UPDATE transports SET status = 'afmelden' WHERE status = 'geannuleerd'")
+    # de gedeelde e-mailplanning-lijst is afgeschaft: elk adres hoort bij één relatie
+    db.execute("DELETE FROM email_planning_opties")
     # relatiecodes van 5 naar 4 cijfers (V00001 -> V0001); het nummer blijft gelijk, dus geen dubbele codes
     db.execute("UPDATE relaties SET code = substr(code, 1, 1) || printf('%04d', CAST(substr(code, 2) AS INTEGER)) "
                "WHERE length(code) = 6")
@@ -335,12 +369,13 @@ def inject_globals():
     return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN,
             "TIJD_OPTIES": TIJD_OPTIES, "APP_VERSIE": APP_VERSIE,
             "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES,
-            "EMAIL_PLANNING": [r["naam"] for r in get_db().execute(
-                "SELECT naam FROM email_planning_opties ORDER BY naam")]}
+            # keuzelijst landcode in relaties: (code, naam) uit de lijst in Beheer
+            "LANDCODE_OPTIES": [(r["naam"].split(" – ")[0], r["naam"]) for r in get_db().execute(
+                "SELECT naam FROM landcodes ORDER BY naam")]}
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.53 - 13-10-2026 21:31"
+APP_VERSIE = "1.58 - 13-10-2026 22:00"
 
 
 @app.after_request
@@ -391,19 +426,10 @@ def next_relation_code(soort):
 
 
 def verwerk_email_planning(waarde):
-    """Bewaart een zelf toegevoegd of gewijzigd e-mailadres voor planning en geeft de waarde terug om op te slaan."""
+    """Geeft het e-mailadres voor planning van deze relatie of transport terug om op te slaan.
+    Elk adres hoort bij één relatie: er is geen gedeelde lijst en wijzigen raakt andere relaties niet."""
     nieuw = request.form.get("nieuwe_email_planning", "").strip()
-    wijzig = request.form.get("wijzig_email_planning", "").strip()
-    db = get_db()
-    if nieuw and wijzig and wijzig != nieuw:
-        # bestaand adres gewijzigd: de lijst, relaties en transporten krijgen de nieuwe naam
-        db.execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw,))
-        db.execute("DELETE FROM email_planning_opties WHERE naam = ?", (wijzig,))
-        db.execute("UPDATE relaties SET email_planning = ? WHERE email_planning = ?", (nieuw, wijzig))
-        db.execute("UPDATE transports SET email_planning = ? WHERE email_planning = ?", (nieuw, wijzig))
-        return nieuw
     if nieuw:
-        db.execute("INSERT OR IGNORE INTO email_planning_opties (naam) VALUES (?)", (nieuw,))
         return nieuw
     if waarde in ("__nieuw__", "__wijzig__"):
         return None
@@ -1356,6 +1382,8 @@ BEHEER_LIJSTEN = {
     "bijzonderheden": {"tabel": "bijzonderheden_opties", "kolommen": BIJZ_KOLOMMEN,
                        "titel": "Bijzonderheden laden en lossen",
                        "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden laden én Bijzonderheden lossen op het transportformulier."},
+    "landcodes": {"tabel": "landcodes", "kolommen": [], "titel": "Landcodes",
+                  "uitleg": "Lijst met landcodes in de vorm code – land (landnummer). Hier kun je namen wijzigen, toevoegen of verwijderen."},
 }
 
 
@@ -2500,7 +2528,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       {% if kind == 'bool' %}
         <input type="checkbox" name="{{ name }}" {% if c[name] %}checked{% endif %}>
       {% elif kind == 'emailplanning' %}
-        {% set opts = EMAIL_PLANNING + ([c['email_planning']] if c['email_planning'] and c['email_planning'] not in EMAIL_PLANNING else []) %}
+        {% set opts = [c['email_planning']] if c['email_planning'] else [] %}
         <select name="email_planning" id="ep_sel">
           <option value="">—</option>
           {% for o in opts %}<option {% if c['email_planning'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
@@ -2509,6 +2537,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
         </select>
         <input type="hidden" name="nieuwe_email_planning" id="nieuwe_ep" value="">
         <input type="hidden" name="wijzig_email_planning" id="wijzig_ep" value="">
+      {% elif kind == 'landcode' %}
+        <select name="{{ name }}">
+          <option value="">—</option>
+          {% for code, naam in LANDCODE_OPTIES %}<option value="{{ code }}" {% if c[name] == code %}selected{% endif %}>{{ naam }}</option>{% endfor %}
+        </select>
       {% elif kind == 'textarea' %}
         <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
       {% else %}

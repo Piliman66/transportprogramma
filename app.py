@@ -392,7 +392,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.63 - 13-10-2026 22:52"
+APP_VERSIE = "1.66 - 13-10-2026 23:12"
 
 
 @app.after_request
@@ -725,9 +725,17 @@ def render_form(t, title, action):
     # gegevens van de gekozen relaties, voor automatisch invullen van de velden in het formulier
     rels = {str(r["id"]): {k: (r[k] if r[k] is not None else "") for k in r.keys()}
             for r in gekozen.values()}
-    locaties = db.execute("SELECT * FROM locaties ORDER BY code").fetchall()
-    locs = {str(l["id"]): {k: (l[k] if l[k] is not None else "") for k in l.keys()}
-            for l in locaties}
+    # laad- en losplaats: alleen de gekozen locatie wordt in het formulier getoond; de rest wordt gezocht
+    try:
+        laad_id = t["laad_locatie_id"]
+    except (KeyError, IndexError, TypeError):
+        laad_id = None
+    try:
+        los_id = t["los_locatie_id"]
+    except (KeyError, IndexError, TypeError):
+        los_id = None
+    laad_label = locatie_label(laad_id)
+    los_label = locatie_label(los_id)
     try:
         tid = t["id"]
     except (KeyError, IndexError, TypeError):
@@ -782,7 +790,7 @@ def render_form(t, title, action):
     opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, fields=TRANSPORT_FIELDS, options=opties,
-                           relations=relations, rels=rels, locaties=locaties, locs=locs,
+                           relations=relations, rels=rels, laad_label=laad_label, los_label=los_label,
                            F={n: (l, k) for n, l, k in TRANSPORT_FIELDS})
 
 
@@ -836,8 +844,9 @@ def transports():
             datum = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
         sql += (" AND (t.number LIKE ? OR t.date LIKE ? OR cu.name LIKE ? OR t.receiver LIKE ?"
                 " OR c.name LIKE ? OR t.vehicle_plate LIKE ?"
+                " OR ll.code LIKE ? OR lo.code LIKE ?"
                 " OR ll.naam LIKE ? OR ll.plaats LIKE ? OR lo.naam LIKE ? OR lo.plaats LIKE ?)")
-        params += [f"%{q}%", f"%{datum}%"] + [f"%{q}%"] * 8
+        params += [f"%{q}%", f"%{datum}%"] + [f"%{q}%"] * 10
     if status in STATUSES:
         sql += " AND t.status = ?"
         params.append(status)
@@ -1078,6 +1087,78 @@ def api_relatie(rid):
     if rij is None:
         return jsonify(None), 404
     return jsonify({k: ("" if rij[k] is None else rij[k]) for k in rij.keys()})
+
+
+LOC_ZOEK_KOLOMMEN = ["id", "code", "naam", "adres", "postcode", "plaats", "land", "openingstijden"]
+
+
+@app.route("/api/locaties/zoek")
+@login_required
+def api_locaties_zoek():
+    """Zoeken op naam, postcode en plaats (minimaal één ingevuld); geeft maximaal 200 locaties."""
+    naam = request.args.get("naam", "").strip()
+    postcode = request.args.get("postcode", "").strip()
+    plaats = request.args.get("plaats", "").strip()
+    if not (naam or postcode or plaats):
+        return jsonify({"lijst": [], "meer": False})
+    sql = "SELECT " + ", ".join(LOC_ZOEK_KOLOMMEN) + " FROM locaties WHERE 1 = 1"
+    params = []
+    for veld, waarde in (("naam", naam), ("postcode", postcode), ("plaats", plaats)):
+        if waarde:
+            sql += f" AND {veld} LIKE ?"
+            params.append(f"%{waarde}%")
+    rijen = get_db().execute(sql + " ORDER BY code LIMIT 201", params).fetchall()
+    lijst = [{k: ("" if r[k] is None else r[k]) for k in LOC_ZOEK_KOLOMMEN} for r in rijen[:200]]
+    return jsonify({"lijst": lijst, "meer": len(rijen) > 200})
+
+
+@app.route("/api/locaties/<int:lid>")
+@login_required
+def api_locatie(lid):
+    rij = get_db().execute("SELECT " + ", ".join(LOC_ZOEK_KOLOMMEN) + " FROM locaties WHERE id = ?", (lid,)).fetchone()
+    if rij is None:
+        return jsonify(None), 404
+    return jsonify({k: ("" if rij[k] is None else rij[k]) for k in LOC_ZOEK_KOLOMMEN})
+
+
+def locatie_code_basis(naam, plaats):
+    """Code van een nieuwe locatie: de eerste 4 letters van de naam, gevolgd door de eerste 4 letters van de plaats."""
+    deel = lambda s: re.sub(r"[^A-Za-z]", "", s or "")[:4].upper()
+    return deel(naam) + deel(plaats)
+
+
+@app.route("/api/locaties/nieuw", methods=["POST"])
+@login_required
+def api_locatie_nieuw():
+    """Nieuwe locatie vanuit het transportformulier. De code is de eerste 4 letters van de naam
+    plus de eerste 4 letters van de plaats; bestaat die code al, dan komt er een volgnummer achter."""
+    gegevens = request.get_json(silent=True) or {}
+    velden = {k: (str(gegevens.get(k) or "").strip() or None) for k in ("naam", "adres", "postcode", "plaats", "land")}
+    if not velden["naam"]:
+        return jsonify({"fout": "Vul de naam van de locatie in."}), 400
+    db = get_db()
+    basis = locatie_code_basis(velden["naam"], velden["plaats"]) or "LOC"
+    code, teller = basis, 1
+    while db.execute("SELECT 1 FROM locaties WHERE code = ?", (code,)).fetchone():
+        teller += 1
+        code = f"{basis}{teller}"
+    db.execute("INSERT INTO locaties (code, naam, adres, postcode, plaats, land) VALUES (?, ?, ?, ?, ?, ?)",
+               (code, velden["naam"], velden["adres"], velden["postcode"], velden["plaats"], velden["land"]))
+    db.commit()
+    rij = db.execute("SELECT " + ", ".join(LOC_ZOEK_KOLOMMEN) + " FROM locaties WHERE code = ?", (code,)).fetchone()
+    return jsonify({k: ("" if rij[k] is None else rij[k]) for k in LOC_ZOEK_KOLOMMEN}), 201
+
+
+def locatie_label(lid):
+    """Tekst voor het veld op het transportformulier, bijvoorbeeld 'CODE – Naam, 1234 AB Plaats'."""
+    if not lid:
+        return ""
+    r = get_db().execute("SELECT code, naam, postcode, plaats FROM locaties WHERE id = ?", (lid,)).fetchone()
+    if r is None:
+        return ""
+    tekst = f"{r['code']} – {r['naam']}"
+    extra = " ".join(x for x in (r["postcode"], r["plaats"]) if x)
+    return f"{tekst}, {extra}" if extra else tekst
 
 
 @app.route("/relaties/nieuw/<soort>", methods=["GET", "POST"])
@@ -1745,7 +1826,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <a class="btn" href="{{ url_for('transport_new') }}">+ Nieuw transport</a>
 </div>
 <form method="get" class="card row">
-  <input name="q" value="{{ q }}" placeholder="Zoek op nummer, datum, relatie, vervoerder, kenteken, laad- of losplaats" style="max-width:520px">
+  <input name="q" value="{{ q }}" placeholder="Zoek op nummer, datum, relatie, vervoerder, kenteken, laad- of losplaats en laad- of losplaatscode" style="max-width:520px">
   <select name="status" style="max-width:200px">
     <option value="">Alle statussen</option>
     {% for s in STATUSES %}<option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>{% endfor %}
@@ -2135,11 +2216,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <span class="lbl">Openingstijden</span>
   <input id="l_openingstijden" readonly>
-  <span class="lbl">Laadplaatscode</span>
-  <select name="laad_locatie_id">
-    <option value="">— kies een laadplaats —</option>
-    {% for l in locaties %}<option value="{{ l['id'] }}" {% if t['laad_locatie_id'] == l['id'] %}selected{% endif %}>{{ l['code'] }} – {{ l['naam'] }}</option>{% endfor %}
-  </select>
+  <span class="lbl">Laadplaats</span>
+  <div style="display:flex;gap:6px">
+    <input id="laad_loc_veld" readonly value="{{ laad_label }}" placeholder="— kies een laadplaats —" style="flex:1">
+    <input type="hidden" name="laad_locatie_id" value="{{ t['laad_locatie_id'] or '' }}">
+    <button type="button" onclick="openLocZoek('laad_locatie_id')">Zoeken…</button>
+    <button type="button" onclick="wisLoc('laad_locatie_id')" title="Laadplaats verwijderen">Wis</button>
+  </div>
   <span class="lbl">Laadplaats naam</span>
   <input id="l_naam" readonly>
   <span class="lbl">Adres</span>
@@ -2189,11 +2272,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <span class="lbl">Openingstijden</span>
   <input id="lo_openingstijden" readonly>
-  <span class="lbl">Losplaatscode</span>
-  <select name="los_locatie_id">
-    <option value="">— kies een losplaats —</option>
-    {% for l in locaties %}<option value="{{ l['id'] }}" {% if t['los_locatie_id'] == l['id'] %}selected{% endif %}>{{ l['code'] }} – {{ l['naam'] }}</option>{% endfor %}
-  </select>
+  <span class="lbl">Losplaats</span>
+  <div style="display:flex;gap:6px">
+    <input id="los_loc_veld" readonly value="{{ los_label }}" placeholder="— kies een losplaats —" style="flex:1">
+    <input type="hidden" name="los_locatie_id" value="{{ t['los_locatie_id'] or '' }}">
+    <button type="button" onclick="openLocZoek('los_locatie_id')">Zoeken…</button>
+    <button type="button" onclick="wisLoc('los_locatie_id')" title="Losplaats verwijderen">Wis</button>
+  </div>
   <span class="lbl">Ontvanger</span>
   <input id="lo_naam" readonly>
   <span class="lbl">Adres</span>
@@ -2231,6 +2316,30 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <div id="deb_res" style="max-height:340px;overflow:auto;margin-top:10px"></div>
   <p style="text-align:right;margin-bottom:0"><button type="button" onclick="document.getElementById('dlg_deb').close()">Annuleren</button></p>
+</dialog>
+<dialog id="dlg_loc" style="width:min(640px,92vw);border:none;border-radius:8px;padding:20px">
+  <h3 id="loc_titel" style="margin-top:0">Laadplaats zoeken</h3>
+  <div style="display:grid;gap:8px">
+    <input id="loc_naam" placeholder="Naam" oninput="zoekLocVertraagd()">
+    <input id="loc_postcode" placeholder="Postcode" oninput="zoekLocVertraagd()">
+    <input id="loc_plaats" placeholder="Plaats" oninput="zoekLocVertraagd()">
+  </div>
+  <div id="loc_res" style="max-height:340px;overflow:auto;margin-top:10px"></div>
+  <div style="margin-top:10px;border-top:1px solid #e1dfdd;padding-top:10px">
+    <button type="button" onclick="toonNieuweLoc()">+ Locatie niet gevonden: nieuwe locatie invoeren</button>
+    <div id="loc_nieuw" style="display:none;margin-top:8px">
+      <div style="display:grid;gap:8px">
+        <input id="nl_naam" placeholder="Naam (verplicht)">
+        <input id="nl_adres" placeholder="Adres">
+        <input id="nl_postcode" placeholder="Postcode">
+        <input id="nl_plaats" placeholder="Plaats">
+        <input id="nl_land" placeholder="Land (bijvoorbeeld NL)">
+      </div>
+      <p id="nl_fout" style="color:#a4262c;margin:6px 0 0"></p>
+      <p style="text-align:right;margin:8px 0 0"><button type="button" onclick="slaNieuweLocOp()">Opslaan en kiezen</button></p>
+    </div>
+  </div>
+  <p style="text-align:right;margin-bottom:0"><button type="button" onclick="document.getElementById('dlg_loc').close()">Annuleren</button></p>
 </dialog>
 <script>
   // gegevens per relatie; velden met een relatie worden automatisch gevuld
@@ -2353,15 +2462,147 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     if (!init) setEP(r ? r.email_planning : '');
   }
   // locaties (laad- en losplaatsen): vul de velden in vanuit de gekozen locatie
-  const LOC = {{ locs|tojson }};
-  function showLoc(selName, p) {
-    const l = LOC[byName(selName).value];
+  // locaties worden op de server gezocht; de gegevens van een gekozen locatie worden opgehaald
+  const LOC = {};
+  const LOC_VELD = {laad_locatie_id: 'laad_loc_veld', los_locatie_id: 'los_loc_veld'};
+  const LOC_PREFIX = {laad_locatie_id: 'l_', los_locatie_id: 'lo_'};
+  let zoekLocVeld = 'laad_locatie_id';
+  let zoekLocNr = 0;
+  let zoekLocTimer = null;
+  function locatieTekst(l) {
+    const extra = [l.postcode, l.plaats].filter(Boolean).join(' ');
+    return l.code + ' – ' + l.naam + (extra ? ', ' + extra : '');
+  }
+  async function haalLoc(id) {
+    if (!id) return null;
+    if (!LOC[id]) {
+      const res = await fetch('/api/locaties/' + id);
+      if (!res.ok) return null;
+      LOC[id] = await res.json();
+    }
+    return LOC[id];
+  }
+  async function showLoc(veld, p) {
+    const l = await haalLoc(byName(veld).value);
     setVal(p + 'naam', l && l.naam);
     setVal(p + 'adres', l && l.adres);
     setVal(p + 'postcode', l && l.postcode);
     setVal(p + 'plaats', l && l.plaats);
     setVal(p + 'land', l && l.land);
     setVal(p + 'openingstijden', l && l.openingstijden);
+    setVal(LOC_VELD[veld], l ? locatieTekst(l) : '');
+  }
+  function openLocZoek(veld) {
+    zoekLocVeld = veld;
+    document.getElementById('loc_titel').textContent = veld === 'laad_locatie_id' ? 'Laadplaats zoeken' : 'Losplaats zoeken';
+    zoekLoc();
+    document.getElementById('dlg_loc').showModal();
+    document.getElementById('loc_naam').focus();
+  }
+  function zoekLocVertraagd() {
+    clearTimeout(zoekLocTimer);
+    zoekLocTimer = setTimeout(zoekLoc, 250);
+  }
+  async function zoekLoc() {
+    const box = document.getElementById('loc_res');
+    const params = new URLSearchParams({
+      naam: document.getElementById('loc_naam').value.trim(),
+      postcode: document.getElementById('loc_postcode').value.trim(),
+      plaats: document.getElementById('loc_plaats').value.trim()
+    });
+    const nr = ++zoekLocNr;
+    box.innerHTML = '';
+    if (!params.get('naam') && !params.get('postcode') && !params.get('plaats')) {
+      box.textContent = 'Typ een naam, postcode of plaats om te zoeken.';
+      return;
+    }
+    box.textContent = 'Zoeken…';
+    let data;
+    try {
+      const res = await fetch('/api/locaties/zoek?' + params.toString());
+      data = await res.json();
+    } catch (e) {
+      if (nr === zoekLocNr) box.textContent = 'Zoeken is mislukt. Probeer het opnieuw.';
+      return;
+    }
+    if (nr !== zoekLocNr) return;
+    box.innerHTML = '';
+    if (!data.lijst.length) {
+      box.textContent = 'Geen locaties gevonden.';
+      return;
+    }
+    data.lijst.forEach(l => {
+      const knop = document.createElement('button');
+      knop.type = 'button';
+      knop.style.cssText = 'display:block;width:100%;text-align:left;margin:0 0 4px 0;padding:6px 8px;background:#fff;color:#201f1e;border:1px solid #c8c6c4;border-radius:4px;box-shadow:none';
+      const regel1 = document.createElement('strong');
+      regel1.textContent = l.code + ' – ' + l.naam;
+      const regel2 = document.createElement('div');
+      regel2.style.cssText = 'font-size:12px;color:#605e5c';
+      regel2.textContent = [l.postcode, l.plaats].filter(Boolean).join(' ');
+      knop.appendChild(regel1);
+      knop.appendChild(regel2);
+      knop.addEventListener('click', () => kiesLoc(l));
+      box.appendChild(knop);
+    });
+    if (data.meer) {
+      const meer = document.createElement('div');
+      meer.style.cssText = 'font-size:12px;color:#605e5c;padding:4px';
+      meer.textContent = 'Eerste 200 resultaten; verfijn je zoekopdracht.';
+      box.appendChild(meer);
+    }
+  }
+  async function kiesLoc(l) {
+    const veld = zoekLocVeld;
+    LOC[l.id] = l;
+    byName(veld).value = String(l.id);
+    ['loc_naam', 'loc_postcode', 'loc_plaats'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('loc_res').innerHTML = '';
+    document.getElementById('dlg_loc').close();
+    await showLoc(veld, LOC_PREFIX[veld]);
+  }
+  // gekozen laad- of losplaats wissen: het veld toont dan weer 'kies een ...'
+  async function wisLoc(veld) {
+    byName(veld).value = '';
+    await showLoc(veld, LOC_PREFIX[veld]);
+  }
+  // nieuwe locatie invoeren als de juiste niet in de lijst staat; wordt opgeslagen in de locaties en direct gekozen
+  function toonNieuweLoc() {
+    document.getElementById('loc_nieuw').style.display = '';
+    document.getElementById('nl_naam').value = document.getElementById('loc_naam').value.trim();
+    document.getElementById('nl_postcode').value = document.getElementById('loc_postcode').value.trim();
+    document.getElementById('nl_plaats').value = document.getElementById('loc_plaats').value.trim();
+    document.getElementById('nl_naam').focus();
+  }
+  async function slaNieuweLocOp() {
+    const fout = document.getElementById('nl_fout');
+    fout.textContent = '';
+    const gegevens = {
+      naam: document.getElementById('nl_naam').value,
+      adres: document.getElementById('nl_adres').value,
+      postcode: document.getElementById('nl_postcode').value,
+      plaats: document.getElementById('nl_plaats').value,
+      land: document.getElementById('nl_land').value
+    };
+    let res, data;
+    try {
+      res = await fetch('/api/locaties/nieuw', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(gegevens)
+      });
+      data = await res.json();
+    } catch (e) {
+      fout.textContent = 'Opslaan is mislukt. Probeer het opnieuw.';
+      return;
+    }
+    if (!res.ok) {
+      fout.textContent = data.fout || 'Opslaan is mislukt.';
+      return;
+    }
+    ['nl_naam', 'nl_adres', 'nl_postcode', 'nl_plaats', 'nl_land'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('loc_nieuw').style.display = 'none';
+    await kiesLoc(data);
   }
   // tijdstip alleen bij onderweg laden/lossen; bij andere status een "–"
   function syncTijd() {
@@ -2497,8 +2738,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   });
   byName('customer_id').addEventListener('change', showCustomer);
   byName('carrier_id').addEventListener('change', () => showCarrier(false));
-  byName('laad_locatie_id').addEventListener('change', () => showLoc('laad_locatie_id', 'l_'));
-  byName('los_locatie_id').addEventListener('change', () => showLoc('los_locatie_id', 'lo_'));
   showCustomer();
   showCarrier(true);
   showLoc('laad_locatie_id', 'l_');

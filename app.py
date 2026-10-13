@@ -383,7 +383,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.59 - 13-10-2026 22:12"
+APP_VERSIE = "1.60 - 13-10-2026 22:25"
 
 
 @app.after_request
@@ -1105,6 +1105,11 @@ RELATIE_IMPORT_KOLOMMEN = {
 }
 
 
+# oude landcodes uit het bestand van het oude systeem omgezet naar de codes van de lijst in Beheer
+LANDCODE_OVERNAME = {"D": "DE", "A": "AT", "E": "ES", "F": "FR", "H": "HU", "I": "IT", "L": "LU",
+                     "P": "PT", "BU": "BG"}
+
+
 def importeer_relaties(bestand):
     """Leest een Excel-export van relaties. V-codes worden vervoerders, D-codes opdrachtgevers.
     Geeft (aantallen per soort, overgeslagen per reden) terug."""
@@ -1115,12 +1120,16 @@ def importeer_relaties(bestand):
     kol = {RELATIE_IMPORT_KOLOMMEN[h]: i for i, h in enumerate(hdr) if h in RELATIE_IMPORT_KOLOMMEN}
     if "code" not in kol or "name" not in kol:
         raise ValueError("De kolommen 'Relatie' en 'Naam' ontbreken in het bestand.")
+    # de kolom 'Land' komt twee keer voor; de eerste is de landcode van de relatie
+    land_i = next((i for i, h in enumerate(hdr) if h == "Land"), None)
     db = get_db()
-    bestaand = {r["code"] for r in db.execute("SELECT code FROM relaties")}
+    bekende_landen = {r["naam"].split(" – ")[0] for r in db.execute("SELECT naam FROM landcodes")}
+    bestaand = {r["code"]: r["landcode"] for r in db.execute("SELECT code, landcode FROM relaties")}
     soorten = {"V": "vervoerder", "W": "vervoerder", "D": "opdrachtgever"}
     teller = {"vervoerder": 0, "opdrachtgever": 0}
     maxn = {"vervoerder": 0, "opdrachtgever": 0}
     overgeslagen = {"andere code (niet V, W of D)": 0, "geen naam": 0, "bestaat al": 0}
+    aangevuld = 0
     for rij in rijen:
         def waarde(veld):
             i = kol.get(veld)
@@ -1128,6 +1137,12 @@ def importeer_relaties(bestand):
                 return None
             tekst = str(rij[i]).strip()
             return tekst or None
+
+        def landcode():
+            if land_i is None or land_i >= len(rij) or rij[land_i] is None:
+                return None
+            lc = LANDCODE_OVERNAME.get(str(rij[land_i]).strip().upper(), str(rij[land_i]).strip().upper())
+            return lc if lc in bekende_landen else None
         code = (waarde("code") or "").upper()
         if not re.fullmatch(r"[VWD]\d{4}", code):
             overgeslagen["andere code (niet V, W of D)"] += 1
@@ -1137,13 +1152,21 @@ def importeer_relaties(bestand):
             overgeslagen["geen naam"] += 1
             continue
         if code in bestaand:
-            overgeslagen["bestaat al"] += 1
+            # bestaande relatie: alleen de landcode aanvullen als die nog leeg is
+            lc = landcode()
+            if lc and not bestaand[code]:
+                db.execute("UPDATE relaties SET landcode = ? WHERE code = ?", (lc, code))
+                bestaand[code] = lc
+                aangevuld += 1
+            else:
+                overgeslagen["bestaat al"] += 1
             continue
-        bestaand.add(code)
+        bestaand[code] = None
         soort = soorten[code[0]]
         vals = {"soort": soort, "code": code, "name": naam}
         for veld in [v for v in RELATIE_IMPORT_KOLOMMEN.values() if v not in ("code", "name")]:
             vals[veld] = waarde(veld)
+        vals["landcode"] = landcode()
         if not vals["zoektekst"]:
             vals["zoektekst"] = naam.upper()[:30]
         db.execute(f"INSERT INTO relaties ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})",
@@ -1157,7 +1180,7 @@ def importeer_relaties(bestand):
             db.execute("INSERT INTO counters (soort, n) VALUES (?, ?) ON CONFLICT(soort) "
                        "DO UPDATE SET n = MAX(n, excluded.n)", (soort, n))
     db.commit()
-    return teller, overgeslagen
+    return teller, overgeslagen, aangevuld
 
 
 @app.route("/relaties/importeren", methods=["GET", "POST"])
@@ -1169,11 +1192,12 @@ def relaties_importeren():
             flash("Kies een Excel-bestand (.xlsx).")
             return redirect(url_for("relaties_importeren"))
         try:
-            teller, overgeslagen = importeer_relaties(bestand)
+            teller, overgeslagen, aangevuld = importeer_relaties(bestand)
         except ValueError as e:
             flash(str(e))
             return redirect(url_for("relaties_importeren"))
         flash(f"Geïmporteerd: {teller['vervoerder']} vervoerders en {teller['opdrachtgever']} opdrachtgevers. "
+              f"Landcode aangevuld bij {aangevuld} bestaande relaties. "
               f"Overgeslagen: " + ", ".join(f"{v} {k}" for k, v in overgeslagen.items() if v) + ".")
         return redirect(url_for("relaties"))
     return render_template("relaties_import.html")
@@ -2513,7 +2537,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <ul>
 <li>Codes die met V of W beginnen worden vervoerders; codes die met D beginnen worden opdrachtgevers.</li>
 <li>Andere codes (zoals L) worden niet geïmporteerd.</li>
-<li>Relaties waarvan de code al bestaat, worden overgeslagen.</li>
+<li>Relaties waarvan de code al bestaat, worden overgeslagen. Hun landcode (kolom Land) wordt wel aangevuld als die nog leeg is.</li>
 </ul>
 <form method="post" enctype="multipart/form-data" class="row">
   <input type="file" name="bestand" accept=".xlsx" required style="max-width:420px">

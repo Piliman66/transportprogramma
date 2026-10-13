@@ -383,7 +383,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.60 - 13-10-2026 22:25"
+APP_VERSIE = "1.62 - 13-10-2026 22:40"
 
 
 @app.after_request
@@ -468,8 +468,9 @@ def verwerk_keuze(veld, tabel, waarde, kolommen=None):
 
 
 def velden_voor(soort):
-    """E-mail planning bestaat alleen bij vervoerders."""
-    return [f for f in RELATION_FIELDS if f[2] != "emailplanning" or soort == "vervoerder"]
+    """Het e-mailveld heet bij vervoerders E-mail planning en bij opdrachtgevers E-mail Dispo."""
+    return [(n, "E-mail Dispo" if k == "emailplanning" and soort == "opdrachtgever" else l, k)
+            for n, l, k in RELATION_FIELDS]
 
 
 def parse_relation_form():
@@ -980,7 +981,7 @@ def transport_delete(tid):
 # kolommen in het relatieoverzicht: (databasekolom, kop); alleen deze mogen gesorteerd/gefilterd worden
 RELATIE_KOLOMMEN = [("code", "Code"), ("name", "Naam"), ("btw_nummer", "BTW nummer"),
                     ("visit_city", "Plaats"), ("telefoon", "Telefoon"),
-                    ("email_planning", "E-mail planning")]
+                    ("email_planning", "E-mail planning / Dispo")]
 
 @app.route("/relaties")
 @login_required
@@ -1101,7 +1102,8 @@ RELATIE_IMPORT_KOLOMMEN = {
     "Relatie": "code", "Naam": "name", "Zoektekst": "zoektekst", "Pst.postcd": "visit_postcode",
     "Pst.plaats": "visit_city", "Pst.adres": "visit_adres", "Regio": "regio", "Telefoon": "telefoon",
     "Telefoon bh": "telefoon_bh", "Telefoon pa": "telefoon_pa", "Wagenpark": "wagenpark_code", "Taal": "taal", "Debiteur": "debiteur_code",
-    "Crediteur": "crediteur_code",
+    "Crediteur": "crediteur_code", "Deb.BTW nr.": "btw_nummer",
+    "E-mail adres.": "email_planning",  # bij opdrachtgevers de e-mail Dispo, bij vervoerders de e-mail planning
 }
 
 
@@ -1124,7 +1126,9 @@ def importeer_relaties(bestand):
     land_i = next((i for i, h in enumerate(hdr) if h == "Land"), None)
     db = get_db()
     bekende_landen = {r["naam"].split(" – ")[0] for r in db.execute("SELECT naam FROM landcodes")}
-    bestaand = {r["code"]: r["landcode"] for r in db.execute("SELECT code, landcode FROM relaties")}
+    bestaand = {r["code"]: {"soort": r["soort"], "landcode": r["landcode"], "btw_nummer": r["btw_nummer"],
+                            "email_planning": r["email_planning"]}
+                for r in db.execute("SELECT code, soort, landcode, btw_nummer, email_planning FROM relaties")}
     soorten = {"V": "vervoerder", "W": "vervoerder", "D": "opdrachtgever"}
     teller = {"vervoerder": 0, "opdrachtgever": 0}
     maxn = {"vervoerder": 0, "opdrachtgever": 0}
@@ -1152,17 +1156,28 @@ def importeer_relaties(bestand):
             overgeslagen["geen naam"] += 1
             continue
         if code in bestaand:
-            # bestaande relatie: alleen de landcode aanvullen als die nog leeg is
+            # bestaande relatie: landcode, btw-nummer en e-mail planning alleen aanvullen als die nog leeg zijn
+            huidig = bestaand[code]
+            nieuw = {}
             lc = landcode()
-            if lc and not bestaand[code]:
-                db.execute("UPDATE relaties SET landcode = ? WHERE code = ?", (lc, code))
-                bestaand[code] = lc
+            if lc and not huidig["landcode"]:
+                nieuw["landcode"] = lc
+            btw = waarde("btw_nummer")
+            if btw and not huidig["btw_nummer"]:
+                nieuw["btw_nummer"] = btw
+            ep = waarde("email_planning")
+            if ep and not huidig["email_planning"]:
+                nieuw["email_planning"] = ep
+            if nieuw:
+                sets = ", ".join(f"{k} = ?" for k in nieuw)
+                db.execute(f"UPDATE relaties SET {sets} WHERE code = ?", list(nieuw.values()) + [code])
+                huidig.update(nieuw)
                 aangevuld += 1
             else:
                 overgeslagen["bestaat al"] += 1
             continue
-        bestaand[code] = None
         soort = soorten[code[0]]
+        bestaand[code] = {"soort": soort, "landcode": None, "btw_nummer": None, "email_planning": None}
         vals = {"soort": soort, "code": code, "name": naam}
         for veld in [v for v in RELATIE_IMPORT_KOLOMMEN.values() if v not in ("code", "name")]:
             vals[veld] = waarde(veld)
@@ -1197,7 +1212,7 @@ def relaties_importeren():
             flash(str(e))
             return redirect(url_for("relaties_importeren"))
         flash(f"Geïmporteerd: {teller['vervoerder']} vervoerders en {teller['opdrachtgever']} opdrachtgevers. "
-              f"Landcode aangevuld bij {aangevuld} bestaande relaties. "
+              f"Bestaande relaties aangevuld (landcode, btw-nummer of e-mail planning): {aangevuld}. "
               f"Overgeslagen: " + ", ".join(f"{v} {k}" for k, v in overgeslagen.items() if v) + ".")
         return redirect(url_for("relaties"))
     return render_template("relaties_import.html")
@@ -1215,7 +1230,7 @@ def relatie_detail(rid):
         "ORDER BY id DESC", (rid, rid)).fetchall()
     locs_rel = db.execute(
         "SELECT * FROM locaties WHERE relatie_id = ? ORDER BY code", (rid,)).fetchall()
-    return render_template("relatie_detail.html", c=c, fields=RELATION_FIELDS, used=used,
+    return render_template("relatie_detail.html", c=c, fields=velden_voor(c["soort"]), used=used,
                            locs_rel=locs_rel)
 
 
@@ -2537,7 +2552,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <ul>
 <li>Codes die met V of W beginnen worden vervoerders; codes die met D beginnen worden opdrachtgevers.</li>
 <li>Andere codes (zoals L) worden niet geïmporteerd.</li>
-<li>Relaties waarvan de code al bestaat, worden overgeslagen. Hun landcode (kolom Land) wordt wel aangevuld als die nog leeg is.</li>
+<li>Relaties waarvan de code al bestaat, worden overgeslagen. Hun landcode, btw-nummer en e-mail planning worden wel aangevuld als die nog leeg zijn.</li>
 </ul>
 <form method="post" enctype="multipart/form-data" class="row">
   <input type="file" name="bestand" accept=".xlsx" required style="max-width:420px">

@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import os
 import re
 import secrets
@@ -339,7 +340,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.43 - 13-10-2026 20:12"
+APP_VERSIE = "1.45 - 13-10-2026 20:32"
 
 
 @app.after_request
@@ -798,7 +799,43 @@ def transports():
         params.append(status)
     sql += " ORDER BY COALESCE(t.date, t.created_at) DESC, t.id DESC"
     rows = get_db().execute(sql, params).fetchall()
-    return render_template("transports.html", rows=rows, q=q, status=status)
+    return render_template("transports.html", rows=rows, q=q, status=status,
+                           kolom_standaard=kolom_standaard())
+
+
+OVERZICHT_KOLOMMEN = 13  # aantal kolommen in het overzicht Transporten
+
+
+def kolom_standaard():
+    """De kolomvolgorde die voor iedereen geldt (of None als er nog geen standaard is ingesteld)."""
+    db = get_db()
+    db.execute("CREATE TABLE IF NOT EXISTS instellingen (sleutel TEXT PRIMARY KEY, waarde TEXT)")
+    rij = db.execute("SELECT waarde FROM instellingen WHERE sleutel = 'transport_kolomvolgorde'").fetchone()
+    if not rij:
+        return None
+    try:
+        volgorde = json.loads(rij["waarde"])
+    except ValueError:
+        return None
+    return volgorde if kolomvolgorde_geldig(volgorde) else None
+
+
+def kolomvolgorde_geldig(volgorde):
+    return (isinstance(volgorde, list) and sorted(volgorde) == list(range(OVERZICHT_KOLOMMEN)))
+
+
+@app.route("/transporten/kolomvolgorde", methods=["POST"])
+@login_required
+def transport_kolomvolgorde():
+    volgorde = (request.get_json(silent=True) or {}).get("volgorde")
+    if not kolomvolgorde_geldig(volgorde):
+        return jsonify(ok=False), 400
+    db = get_db()
+    db.execute("CREATE TABLE IF NOT EXISTS instellingen (sleutel TEXT PRIMARY KEY, waarde TEXT)")
+    db.execute("INSERT OR REPLACE INTO instellingen (sleutel, waarde) VALUES ('transport_kolomvolgorde', ?)",
+               (json.dumps(volgorde),))
+    db.commit()
+    return jsonify(ok=True)
 
 
 @app.route("/transporten/nieuw", methods=["GET", "POST"])
@@ -1573,22 +1610,24 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <tr><td colspan="13">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
-<p style="font-size:13px;color:#605e5c">Sleep een kolomkop naar een andere plek om de kolommen te verschuiven. <a href="#" id="kolom_reset">Standaard volgorde</a></p>
+<p style="font-size:13px;color:#605e5c">Sleep een kolomkop naar een andere plek om de kolommen te verschuiven. <a href="#" id="kolom_reset">Standaard volgorde</a> · <a href="#" id="kolom_bewaar">Huidige indeling als standaard voor iedereen</a></p>
 <script>
 (function () {
-  // kolomvolgorde per gebruiker in deze browser onthouden
   const tabel = document.querySelector('table.een-regel');
   if (!tabel) return;
   const KEY = 'transport_kolomvolgorde';
   const kop = tabel.querySelector('tr');
   const n = kop.children.length;
-  const standaard = Array.from({length: n}, (_, i) => i);
+  const geldig = v => Array.isArray(v) && v.length === n &&
+    v.slice().sort((a, b) => a - b).every((x, i) => x === i);
+  // de standaard die voor iedereen geldt; zonder instelling de oorspronkelijke volgorde
+  const serverStandaard = {{ kolom_standaard|tojson }};
+  let standaard = geldig(serverStandaard) ? serverStandaard : Array.from({length: n}, (_, i) => i);
+  // een eigen aangepaste volgorde in deze browser gaat voor de standaard
   let volgorde = standaard.slice();
   try {
-    const opgeslagen = JSON.parse(localStorage.getItem(KEY) || 'null');
-    const geldig = Array.isArray(opgeslagen) && opgeslagen.length === n &&
-      opgeslagen.slice().sort((a, b) => a - b).every((v, i) => v === i);
-    if (geldig) volgorde = opgeslagen;
+    const eigen = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (geldig(eigen)) volgorde = eigen;
   } catch (e) { /* geen opslag beschikbaar: standaard volgorde */ }
   // elke cel krijgt het nummer van zijn oorspronkelijke kolom
   tabel.querySelectorAll('tr').forEach(tr => {
@@ -1628,11 +1667,75 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       bewaar();
     });
   });
+  // sorteren per kolom met de driehoekjes: numeriek, datum (dd-mm-jjjj) of alfabetisch; lege waarden onderaan
+  let actief = null;
+  function sorteer(th, dir) {
+    const i = th.dataset.i;
+    const rijen = Array.from(tabel.querySelectorAll('tr')).filter(tr => tr !== kop && tr.children.length === n);
+    if (!rijen.length) return;
+    const waarde = tr => {
+      const c = Array.from(tr.children).find(cel => cel.dataset.i === i);
+      return c ? c.textContent.trim() : '';
+    };
+    const data = rijen.map(tr => ({tr: tr, v: waarde(tr)}));
+    const gevuld = data.map(x => x.v).filter(v => v !== '');
+    const getal = v => /^-?[0-9]+([.,][0-9]+)?$/.test(v);
+    const datum = v => /^[0-9]{2}-[0-9]{2}-[0-9]{4}/.test(v);
+    const naarIso = v => v.slice(6, 10) + '-' + v.slice(3, 5) + '-' + v.slice(0, 2) + v.slice(10);
+    let vergelijk;
+    if (gevuld.length && gevuld.every(getal)) {
+      vergelijk = (a, b) => parseFloat(a.replace(',', '.')) - parseFloat(b.replace(',', '.'));
+    } else if (gevuld.length && gevuld.every(datum)) {
+      vergelijk = (a, b) => naarIso(a).localeCompare(naarIso(b));
+    } else {
+      vergelijk = (a, b) => a.localeCompare(b, 'nl', {numeric: true, sensitivity: 'base'});
+    }
+    data.sort((a, b) => {
+      if (a.v === '' || b.v === '') return (a.v === '') - (b.v === '');  // lege waarden altijd achteraan
+      const r = vergelijk(a.v, b.v);
+      return dir === 'desc' ? -r : r;
+    });
+    data.forEach(x => rijen[0].parentNode.appendChild(x.tr));
+    tabel.querySelectorAll('.sorteer span').forEach(s => { s.style.color = '#a19f9d'; });
+    th.querySelector('.sorteer span[data-dir="' + dir + '"]').style.color = '#0078d4';
+    actief = {i: i, dir: dir};
+  }
+  Array.from(kop.children).forEach(th => {
+    const wrap = document.createElement('span');
+    wrap.className = 'sorteer';
+    wrap.style.cssText = 'margin-left:6px;white-space:nowrap';
+    [['asc', '▲'], ['desc', '▼']].forEach(([dir, teken]) => {
+      const knop = document.createElement('span');
+      knop.dataset.dir = dir;
+      knop.textContent = teken;
+      knop.title = dir === 'asc' ? 'Oplopend sorteren' : 'Aflopend sorteren';
+      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:11px;padding:0 1px';
+      knop.addEventListener('click', e => { e.stopPropagation(); sorteer(th, dir); });
+      wrap.appendChild(knop);
+    });
+    th.appendChild(wrap);
+  });
   document.getElementById('kolom_reset').addEventListener('click', e => {
     e.preventDefault();
     volgorde = standaard.slice();
     toepassen();
     try { localStorage.removeItem(KEY); } catch (err) { /* niets te wissen */ }
+  });
+  document.getElementById('kolom_bewaar').addEventListener('click', async e => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/transporten/kolomvolgorde', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({volgorde: volgorde})
+      });
+      if (!res.ok) throw new Error('niet opgeslagen');
+      standaard = volgorde.slice();
+      try { localStorage.removeItem(KEY); } catch (err) { /* niets te wissen */ }
+      alert('De huidige kolomvolgorde is nu de standaard voor iedereen.');
+    } catch (err) {
+      alert('Opslaan is mislukt. Probeer het opnieuw.');
+    }
   });
 })();
 </script>

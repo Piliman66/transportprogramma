@@ -340,7 +340,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.51 - 13-10-2026 21:10"
+APP_VERSIE = "1.53 - 13-10-2026 21:31"
 
 
 @app.after_request
@@ -1736,7 +1736,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       knop.dataset.dir = dir;
       knop.textContent = teken;
       knop.title = dir === 'asc' ? 'Oplopend sorteren' : 'Aflopend sorteren';
-      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:13px;line-height:0.8;padding:0 1px';
+      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:11px;line-height:0.8;padding:0 1px';
       knop.addEventListener('click', e => { e.stopPropagation(); sorteer(th, dir); });
       wrap.appendChild(knop);
     });
@@ -1922,6 +1922,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <input id="cust_naam" readonly value="{{ relations['cust_label'] }}" placeholder="— kies een debiteur —" style="flex:1">
     <input type="hidden" name="customer_id" value="{{ t['customer_id'] or '' }}">
     <button type="button" onclick="openRelZoek('customer_id')">Zoeken…</button>
+    <button type="button" onclick="wisRel('customer_id')" title="Debiteur verwijderen">Wis</button>
   </div>
   <span class="lbl">Naam debiteur</span>
   <input id="c_name" readonly>
@@ -1946,6 +1947,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <input id="carr_naam" readonly value="{{ relations['carr_label'] }}" placeholder="— kies een vervoerder —" style="flex:1">
     <input type="hidden" name="carrier_id" value="{{ t['carrier_id'] or '' }}">
     <button type="button" onclick="openRelZoek('carrier_id')">Zoeken…</button>
+    <button type="button" onclick="wisRel('carrier_id')" title="Vervoerder verwijderen">Wis</button>
   </div>
   <span class="lbl">Naam vervoerder</span>
   <input id="v_name" readonly>
@@ -2170,6 +2172,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     ['deb_naam', 'deb_plaats', 'deb_btw'].forEach(id => { document.getElementById(id).value = ''; });
     document.getElementById('deb_res').innerHTML = '';
     document.getElementById('dlg_deb').close();
+    if (veld === 'customer_id') await showCustomer(); else await showCarrier(false);
+  }
+  // gekozen debiteur of vervoerder wissen: het veld toont dan weer 'kies een ...'
+  async function wisRel(veld) {
+    byName(veld).value = '';
+    document.getElementById(ZOEK[veld].label).value = '';
     if (veld === 'customer_id') await showCustomer(); else await showCarrier(false);
   }
   const byName = (n) => document.querySelector('[name="' + n + '"]');
@@ -2436,8 +2444,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 {% for k, kop in kolommen %}
   <th style="white-space:nowrap">{{ kop }}
     <span style="display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin-left:6px;line-height:1">
-      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:13px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a>
-      <a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:13px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
+      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:11px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a>
+      <a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:11px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
     </span>
   </th>
 {% endfor %}

@@ -340,7 +340,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.49 - 13-10-2026 21:01"
+APP_VERSIE = "1.51 - 13-10-2026 21:10"
 
 
 @app.after_request
@@ -963,14 +963,7 @@ def relaties():
                     "email", "email_planning", "email_boekhouding"]
         sql += " AND (" + " OR ".join(f"{k} LIKE ?" for k in kolommen) + ")"
         params += [f"%{q}%"] * len(kolommen)
-    # per-kolom filter (tekst bevat) en sorteren; alleen vaste kolomnamen uit RELATIE_KOLOMMEN
-    kolom_filters = {}
-    for k, _ in RELATIE_KOLOMMEN:
-        waarde = request.args.get("f_" + k, "").strip()
-        kolom_filters[k] = waarde
-        if waarde:
-            sql += f" AND {k} LIKE ?"
-            params.append(f"%{waarde}%")
+    # sorteren per kolom; alleen vaste kolomnamen uit RELATIE_KOLOMMEN
     sort = request.args.get("sort", "name")
     if sort not in dict(RELATIE_KOLOMMEN):
         sort = "name"
@@ -990,7 +983,6 @@ def relaties():
                       params + [pagina_grootte, (pagina - 1) * pagina_grootte]).fetchall()
 
     basis = {"soort": soort, "q": q, "sort": sort, "dir": richting}
-    basis.update({"f_" + k: v for k, v in kolom_filters.items()})
 
     def link(**kw):
         d = dict(basis)
@@ -1000,7 +992,7 @@ def relaties():
     title = SOORTEN[soort][1] + "s" if soort in SOORTEN else "Relaties"
     return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title,
                            aantal=aantal, pagina=pagina, pages=pages,
-                           kolommen=RELATIE_KOLOMMEN, kolom_filters=kolom_filters,
+                           kolommen=RELATIE_KOLOMMEN,
                            sort=sort, dir=richting, link=link)
 
 
@@ -1744,7 +1736,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       knop.dataset.dir = dir;
       knop.textContent = teken;
       knop.title = dir === 'asc' ? 'Oplopend sorteren' : 'Aflopend sorteren';
-      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:9px;line-height:1.1;padding:0 1px';
+      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:13px;line-height:0.8;padding:0 1px';
       knop.addEventListener('click', e => { e.stopPropagation(); sorteer(th, dir); });
       wrap.appendChild(knop);
     });
@@ -2439,25 +2431,15 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <input name="q" value="{{ q }}" placeholder="Zoek op code, naam, plaats, BTW nummer of e-mail" style="max-width:360px">
   <button>Zoeken</button>
 </form>
-<form method="get" id="kolomfilter">
-<input type="hidden" name="soort" value="{{ soort }}">
-<input type="hidden" name="q" value="{{ q }}">
-<input type="hidden" name="sort" value="{{ sort }}">
-<input type="hidden" name="dir" value="{{ dir }}">
 <table>
 <tr>
 {% for k, kop in kolommen %}
   <th style="white-space:nowrap">{{ kop }}
     <span style="display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin-left:6px;line-height:1">
-      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:9px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a>
-      <a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:9px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
+      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:13px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a>
+      <a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:13px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
     </span>
   </th>
-{% endfor %}
-</tr>
-<tr>
-{% for k, kop in kolommen %}
-  <td style="padding:4px"><input name="f_{{ k }}" value="{{ kolom_filters[k] }}" placeholder="filter" style="width:100%;min-width:0;box-sizing:border-box;padding:4px;font-size:13px"></td>
 {% endfor %}
 </tr>
 {% for c in rows %}
@@ -2473,14 +2455,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <tr><td colspan="6">Nog niets gevonden.</td></tr>
 {% endfor %}
 </table>
-<p style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-  <button>Filter toepassen</button>
-  <a href="{{ link(f_code='', f_name='', f_btw_nummer='', f_visit_city='', f_telefoon='', f_email_planning='', pagina=1) }}">Wis filters</a>
+<p style="display:flex;gap:12px;align-items:center">
   <span>{{ aantal }} relaties{% if pages > 1 %}, pagina {{ pagina }} van {{ pages }}{% endif %}</span>
   {% if pagina > 1 %}<a href="{{ link(pagina=pagina-1) }}">‹ Vorige</a>{% endif %}
   {% if pagina < pages %}<a href="{{ link(pagina=pagina+1) }}">Volgende ›</a>{% endif %}
 </p>
-</form>
 {% endblock %}""",
 
 "relaties_import.html": """{% extends "base.html" %}{% block content %}

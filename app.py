@@ -339,7 +339,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.40 - 12-10-2026 23:24"
+APP_VERSIE = "1.43 - 13-10-2026 20:12"
 
 
 @app.after_request
@@ -546,6 +546,9 @@ def parse_transport_form():
     if nieuw_lm:
         get_db().execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (nieuw_lm,))
         data["laden_met"] = nieuw_lm
+    # zolang het transport in de eerste twee stappen zit, bepaalt de vervoerder de status
+    if data["status"] in ("nog indelen", "ingedeeld"):
+        data["status"] = "ingedeeld" if data["carrier_id"] else "nog indelen"
     if data["status"] not in STATUSES:
         errors.append("Ongeldige status.")
     # tijdstip en tekst alleen bewaren bij de status waar ze bij horen
@@ -773,7 +776,8 @@ def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
-           "ll.plaats AS laad_plaats, lo.plaats AS los_plaats FROM transports t "
+           "ll.plaats AS laad_plaats, ll.postcode AS laad_postcode, "
+           "lo.plaats AS los_plaats, lo.postcode AS los_postcode FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
            "LEFT JOIN relaties c ON c.id = t.carrier_id "
            "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
@@ -862,10 +866,18 @@ def transport_edit(tid):
     return render_form(t, f"Bewerk {t['number']}", action)
 
 
+def t_carrier(tid):
+    rij = get_db().execute("SELECT carrier_id FROM transports WHERE id = ?", (tid,)).fetchone()
+    return rij["carrier_id"] if rij else None
+
+
 @app.route("/transporten/<int:tid>/status", methods=["POST"])
 @login_required
 def transport_status(tid):
     new = request.form.get("status")
+    if new in ("nog indelen", "ingedeeld"):
+        # zonder vervoerder altijd 'nog indelen', met vervoerder 'ingedeeld'
+        new = "ingedeeld" if t_carrier(tid) else "nog indelen"
     db = get_db()
     t = db.execute("SELECT id, status FROM transports WHERE id = ?", (tid,)).fetchone()
     if t is None:
@@ -1540,23 +1552,90 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <button>Zoeken</button>
 </form>
 <table class="een-regel">
-<tr><th>Nummer</th><th>Datum</th><th>Status</th><th>Opdrachtgever</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
+<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Postcode laden</th><th>Losplaats</th><th>Postcode lossen</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td title="{{ t['date']|nl_datum }}">{{ (t['date']|nl_datum)[:10] }}</td>
+  <td>{{ t['los_datum']|nl_datum }}</td>
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
+  <td>{{ t['referentie'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>
+  <td>{{ t['laad_postcode'] or '' }}</td>
   <td>{{ t['los_plaats'] or '' }}</td>
+  <td>{{ t['los_postcode'] or '' }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="9">Nog geen transporten gevonden.</td></tr>
+<tr><td colspan="13">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
+<p style="font-size:13px;color:#605e5c">Sleep een kolomkop naar een andere plek om de kolommen te verschuiven. <a href="#" id="kolom_reset">Standaard volgorde</a></p>
+<script>
+(function () {
+  // kolomvolgorde per gebruiker in deze browser onthouden
+  const tabel = document.querySelector('table.een-regel');
+  if (!tabel) return;
+  const KEY = 'transport_kolomvolgorde';
+  const kop = tabel.querySelector('tr');
+  const n = kop.children.length;
+  const standaard = Array.from({length: n}, (_, i) => i);
+  let volgorde = standaard.slice();
+  try {
+    const opgeslagen = JSON.parse(localStorage.getItem(KEY) || 'null');
+    const geldig = Array.isArray(opgeslagen) && opgeslagen.length === n &&
+      opgeslagen.slice().sort((a, b) => a - b).every((v, i) => v === i);
+    if (geldig) volgorde = opgeslagen;
+  } catch (e) { /* geen opslag beschikbaar: standaard volgorde */ }
+  // elke cel krijgt het nummer van zijn oorspronkelijke kolom
+  tabel.querySelectorAll('tr').forEach(tr => {
+    if (tr.children.length === n) Array.from(tr.children).forEach((c, i) => { c.dataset.i = i; });
+  });
+  function toepassen() {
+    tabel.querySelectorAll('tr').forEach(tr => {
+      if (tr.children.length !== n) return;  // melding 'geen transporten'
+      const per = {};
+      Array.from(tr.children).forEach(c => { per[c.dataset.i] = c; });
+      volgorde.forEach(i => tr.appendChild(per[i]));
+    });
+  }
+  function bewaar() {
+    try { localStorage.setItem(KEY, JSON.stringify(volgorde)); } catch (e) { /* niet opgeslagen */ }
+  }
+  toepassen();
+  let van = null;
+  Array.from(kop.children).forEach(th => {
+    th.draggable = true;
+    th.style.cursor = 'grab';
+    th.addEventListener('dragstart', e => {
+      van = th;
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', ''); } catch (err) { /* sommige browsers */ }
+    });
+    th.addEventListener('dragover', e => { e.preventDefault(); });
+    th.addEventListener('drop', e => {
+      e.preventDefault();
+      if (!van || van === th) return;
+      const kolommen = Array.from(kop.children);
+      const a = kolommen.indexOf(van);
+      const b = kolommen.indexOf(th);
+      volgorde.splice(b, 0, volgorde.splice(a, 1)[0]);
+      van = null;
+      toepassen();
+      bewaar();
+    });
+  });
+  document.getElementById('kolom_reset').addEventListener('click', e => {
+    e.preventDefault();
+    volgorde = standaard.slice();
+    toepassen();
+    try { localStorage.removeItem(KEY); } catch (err) { /* niets te wissen */ }
+  });
+})();
+</script>
 {% endblock %}""",
 
 "transport_form.html": """{% extends "base.html" %}{% block content %}
@@ -1908,6 +1987,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   async function showCarrier(init) {
     const r = await haalRel(byName('carrier_id').value);
     setVal('v_name', r && r.name);
+    // status volgt de vervoerder: zonder vervoerder 'nog indelen', met vervoerder 'ingedeeld'
+    const st = byName('status');
+    if (!init && st && (st.value === 'nog indelen' || st.value === 'ingedeeld')) {
+      st.value = r ? 'ingedeeld' : 'nog indelen';
+    }
     // bij het kiezen van een vervoerder het planningsadres van die vervoerder; bij openen niet
     if (!init) setEP(r ? r.email_planning : '');
   }

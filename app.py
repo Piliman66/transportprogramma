@@ -340,7 +340,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.45 - 13-10-2026 20:32"
+APP_VERSIE = "1.46 - 13-10-2026 20:35"
 
 
 @app.after_request
@@ -1593,7 +1593,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
-  <td title="{{ t['date']|nl_datum }}">{{ (t['date']|nl_datum)[:10] }}</td>
+  <td data-iso="{{ (t['date'] or '')[:10] }}" title="{{ t['date']|nl_datum }}">{{ (t['date']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
@@ -1610,6 +1610,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <tr><td colspan="13">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
+<dialog id="dlg_datum" style="border:none;border-radius:8px;padding:16px;width:min(340px,92vw)">
+  <div id="kalender"></div>
+  <p style="text-align:right;margin:10px 0 0"><button type="button" id="datum_wis">Wis filter</button> <button type="button" id="datum_klaar">Sluiten</button></p>
+</dialog>
 <p style="font-size:13px;color:#605e5c">Sleep een kolomkop naar een andere plek om de kolommen te verschuiven. <a href="#" id="kolom_reset">Standaard volgorde</a> · <a href="#" id="kolom_bewaar">Huidige indeling als standaard voor iedereen</a></p>
 <script>
 (function () {
@@ -1714,6 +1718,84 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       wrap.appendChild(knop);
     });
     th.appendChild(wrap);
+  });
+  // datumfilter: klik op het woord Datum en kies één of meer dagen in de kalender
+  const datumKop = Array.from(kop.children).find(th => th.firstChild && th.firstChild.textContent.trim() === 'Datum');
+  const datumLabel = document.createElement('span');
+  datumLabel.textContent = 'Datum';
+  datumLabel.title = 'Filter op datum';
+  datumLabel.style.cssText = 'cursor:pointer;text-decoration:underline dotted';
+  datumKop.replaceChild(datumLabel, datumKop.firstChild);
+  const geselecteerd = new Set();
+  const maandNamen = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+  const dagNamen = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
+  let getoondJaar = 0, getoondMaand = 0;
+  const pad = v => (v < 10 ? '0' : '') + v;
+  function pasDatumFilter() {
+    const i = datumKop.dataset.i;
+    tabel.querySelectorAll('tr').forEach(tr => {
+      if (tr === kop || tr.children.length !== n) return;
+      const cel = Array.from(tr.children).find(c => c.dataset.i === i);
+      const iso = cel ? (cel.dataset.iso || '') : '';
+      tr.style.display = (geselecteerd.size === 0 || geselecteerd.has(iso)) ? '' : 'none';
+    });
+    datumLabel.textContent = geselecteerd.size ? 'Datum (' + geselecteerd.size + ')' : 'Datum';
+  }
+  function tekenKalender() {
+    const box = document.getElementById('kalender');
+    box.innerHTML = '';
+    const kopRij = document.createElement('div');
+    kopRij.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+    const vorige = document.createElement('button');
+    vorige.type = 'button'; vorige.textContent = '‹';
+    vorige.addEventListener('click', () => { getoondMaand--; if (getoondMaand < 0) { getoondMaand = 11; getoondJaar--; } tekenKalender(); });
+    const titel = document.createElement('strong');
+    titel.textContent = maandNamen[getoondMaand] + ' ' + getoondJaar;
+    const volgende = document.createElement('button');
+    volgende.type = 'button'; volgende.textContent = '›';
+    volgende.addEventListener('click', () => { getoondMaand++; if (getoondMaand > 11) { getoondMaand = 0; getoondJaar++; } tekenKalender(); });
+    kopRij.appendChild(vorige); kopRij.appendChild(titel); kopRij.appendChild(volgende);
+    box.appendChild(kopRij);
+    const rooster = document.createElement('div');
+    rooster.style.cssText = 'display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center';
+    dagNamen.forEach(d => {
+      const c = document.createElement('div');
+      c.textContent = d; c.style.cssText = 'font-size:12px;color:#605e5c';
+      rooster.appendChild(c);
+    });
+    const leeg = (new Date(getoondJaar, getoondMaand, 1).getDay() + 6) % 7;  // weken beginnen op maandag
+    for (let k = 0; k < leeg; k++) rooster.appendChild(document.createElement('div'));
+    const dagen = new Date(getoondJaar, getoondMaand + 1, 0).getDate();
+    for (let dag = 1; dag <= dagen; dag++) {
+      const iso = getoondJaar + '-' + pad(getoondMaand + 1) + '-' + pad(dag);
+      const knop = document.createElement('button');
+      knop.type = 'button';
+      knop.textContent = dag;
+      const aan = geselecteerd.has(iso);
+      knop.style.cssText = 'padding:6px 0;border-radius:4px;border:1px solid #c8c6c4;background:' + (aan ? '#0078d4' : '#fff') + ';color:' + (aan ? '#fff' : '#201f1e');
+      knop.addEventListener('click', () => {
+        if (geselecteerd.has(iso)) geselecteerd.delete(iso); else geselecteerd.add(iso);
+        pasDatumFilter();
+        tekenKalender();
+      });
+      rooster.appendChild(knop);
+    }
+    box.appendChild(rooster);
+  }
+  datumLabel.addEventListener('click', () => {
+    // toon de maand van de eerste gekozen dag, anders de huidige maand
+    const eerste = Array.from(geselecteerd).sort()[0];
+    const basis = eerste ? new Date(eerste + 'T00:00:00') : new Date();
+    getoondJaar = basis.getFullYear();
+    getoondMaand = basis.getMonth();
+    tekenKalender();
+    document.getElementById('dlg_datum').showModal();
+  });
+  document.getElementById('datum_klaar').addEventListener('click', () => document.getElementById('dlg_datum').close());
+  document.getElementById('datum_wis').addEventListener('click', () => {
+    geselecteerd.clear();
+    pasDatumFilter();
+    tekenKalender();
   });
   document.getElementById('kolom_reset').addEventListener('click', e => {
     e.preventDefault();

@@ -340,7 +340,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.47 - 13-10-2026 20:58"
+APP_VERSIE = "1.49 - 13-10-2026 21:01"
 
 
 @app.after_request
@@ -1738,13 +1738,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   Array.from(kop.children).forEach(th => {
     const wrap = document.createElement('span');
     wrap.className = 'sorteer';
-    wrap.style.cssText = 'margin-left:6px;white-space:nowrap';
+    wrap.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin-left:6px;line-height:1;white-space:nowrap';
     [['asc', '▲'], ['desc', '▼']].forEach(([dir, teken]) => {
       const knop = document.createElement('span');
       knop.dataset.dir = dir;
       knop.textContent = teken;
       knop.title = dir === 'asc' ? 'Oplopend sorteren' : 'Aflopend sorteren';
-      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:11px;padding:0 1px';
+      knop.style.cssText = 'cursor:pointer;color:#a19f9d;font-size:9px;line-height:1.1;padding:0 1px';
       knop.addEventListener('click', e => { e.stopPropagation(); sorteer(th, dir); });
       wrap.appendChild(knop);
     });
@@ -2448,8 +2448,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <tr>
 {% for k, kop in kolommen %}
   <th style="white-space:nowrap">{{ kop }}
-    <span style="margin-left:6px;white-space:nowrap">
-      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:11px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a><a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:11px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
+    <span style="display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin-left:6px;line-height:1">
+      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:9px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a>
+      <a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:9px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
     </span>
   </th>
 {% endfor %}

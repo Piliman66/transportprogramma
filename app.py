@@ -196,6 +196,11 @@ CREATE TABLE IF NOT EXISTS locaties (
     bijzonderheden_laden TEXT,
     relatie_id INTEGER REFERENCES relaties(id)
 );
+CREATE TABLE IF NOT EXISTS locatie_relaties (
+    locatie_id INTEGER NOT NULL REFERENCES locaties(id),
+    relatie_id INTEGER NOT NULL REFERENCES relaties(id),
+    PRIMARY KEY (locatie_id, relatie_id)
+);
 CREATE TABLE IF NOT EXISTS transports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT UNIQUE NOT NULL,
@@ -256,7 +261,6 @@ LOC_FIELDS = [
     ("telefoon", "Telefoonnummer", "text"),
     ("contactpersoon", "Contactpersoon", "text"),
     ("bijzonderheden_laden", "Bijzonderheden laden", "textarea"),
-    ("relatie_id", "Relatie", "relatie"),
 ]
 
 
@@ -347,10 +351,14 @@ def init_db():
     have_loc = {r[1] for r in db.execute("PRAGMA table_info(locaties)")}
     for name, _, kind in LOC_FIELDS:
         if name not in have_loc:
-            if kind == "relatie":
-                db.execute("ALTER TABLE locaties ADD COLUMN relatie_id INTEGER REFERENCES relaties(id)")
-            else:
-                db.execute(f"ALTER TABLE locaties ADD COLUMN {name} TEXT")
+            db.execute(f"ALTER TABLE locaties ADD COLUMN {name} TEXT")
+    # versie 5: een locatie kan meerdere opdrachtgevers hebben; de oude ene koppeling overzetten
+    if "relatie_id" not in have_loc:
+        db.execute("ALTER TABLE locaties ADD COLUMN relatie_id INTEGER REFERENCES relaties(id)")
+    if db.execute("PRAGMA user_version").fetchone()[0] < 5:
+        db.execute("INSERT OR IGNORE INTO locatie_relaties (locatie_id, relatie_id) "
+                   "SELECT id, relatie_id FROM locaties WHERE relatie_id IS NOT NULL")
+        db.execute("PRAGMA user_version = 5")
     have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
     for name, _, kind in RELATION_FIELDS:
         if name not in have_rel:
@@ -392,7 +400,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.66 - 13-10-2026 23:12"
+APP_VERSIE = "1.68 - 13-10-2026 23:40"
 
 
 @app.after_request
@@ -1319,7 +1327,8 @@ def relatie_detail(rid):
         "SELECT id, number, date, status FROM transports WHERE customer_id = ? OR carrier_id = ? "
         "ORDER BY id DESC", (rid, rid)).fetchall()
     locs_rel = db.execute(
-        "SELECT * FROM locaties WHERE relatie_id = ? ORDER BY code", (rid,)).fetchall()
+        "SELECT l.* FROM locaties l JOIN locatie_relaties lr ON lr.locatie_id = l.id "
+        "WHERE lr.relatie_id = ? ORDER BY l.code", (rid,)).fetchall()
     return render_template("relatie_detail.html", c=c, fields=velden_voor(c["soort"]), used=used,
                            locs_rel=locs_rel)
 
@@ -1357,6 +1366,7 @@ def relatie_delete(rid):
     db.execute("UPDATE transports SET customer_id = NULL WHERE customer_id = ?", (rid,))
     db.execute("UPDATE transports SET carrier_id = NULL WHERE carrier_id = ?", (rid,))
     db.execute("UPDATE locaties SET relatie_id = NULL WHERE relatie_id = ?", (rid,))
+    db.execute("DELETE FROM locatie_relaties WHERE relatie_id = ?", (rid,))
     db.execute("DELETE FROM relaties WHERE id = ?", (rid,))
     db.commit()
     flash("Relatie verwijderd. Gekoppelde transporten hebben die relatie niet meer.")
@@ -1368,8 +1378,19 @@ def relatie_delete(rid):
 LOC_NAMES = [n for n, _, _ in LOC_FIELDS]
 
 
-def relatie_opties():
-    return get_db().execute("SELECT id, code, name FROM relaties ORDER BY name").fetchall()
+def gekozen_relaties(ids):
+    """Opdrachtgevers (id, code, name) voor de gegeven id's, in de volgorde van de naam."""
+    if not ids:
+        return []
+    marks = ", ".join("?" * len(ids))
+    return get_db().execute(f"SELECT id, code, name FROM relaties WHERE id IN ({marks}) ORDER BY name",
+                            list(ids)).fetchall()
+
+
+def zet_locatie_relaties(db, lid, ids):
+    db.execute("DELETE FROM locatie_relaties WHERE locatie_id = ?", (lid,))
+    for rid in ids:
+        db.execute("INSERT OR IGNORE INTO locatie_relaties (locatie_id, relatie_id) VALUES (?, ?)", (lid, rid))
 
 
 def next_location_code():
@@ -1382,19 +1403,57 @@ def next_location_code():
 
 def parse_location_form():
     data = {n: (request.form.get(n, "").strip() or None) for n in LOC_NAMES}
-    rid = data["relatie_id"]
-    data["relatie_id"] = int(rid) if rid and rid.isdigit() else None
+    ids = []
+    for x in request.form.getlist("relatie_ids"):
+        if x.isdigit() and int(x) not in ids:
+            ids.append(int(x))
+    data["relatie_ids"] = ids
     errors = [] if data["naam"] else ["Naam is verplicht."]
     return data, errors
+
+
+# subquery: alle opdrachtgeverscodes van een locatie, voor sorteren
+LOC_RELATIES_SQL = ("(SELECT group_concat(r.code, ', ') FROM locatie_relaties lr "
+                    "JOIN relaties r ON r.id = lr.relatie_id WHERE lr.locatie_id = l.id)")
+# kolommen van het locatieoverzicht: (sleutel, kop) en de SQL-kolom waarop gesorteerd wordt
+LOC_KOLOMMEN = [("code", "Code"), ("naam", "Naam"), ("relatie", "Opdrachtgevers"), ("plaats", "Plaats"),
+                ("land", "Land"), ("openingstijden", "Openingstijden")]
+LOC_SORTEER = {"code": "l.code", "naam": "l.naam", "relatie": LOC_RELATIES_SQL, "plaats": "l.plaats",
+               "land": "l.land", "openingstijden": "l.openingstijden"}
 
 
 @app.route("/locaties")
 @login_required
 def locaties():
-    rows = get_db().execute(
-        "SELECT l.*, r.code AS rcode, r.name AS rname FROM locaties l "
-        "LEFT JOIN relaties r ON r.id = l.relatie_id ORDER BY l.code").fetchall()
-    return render_template("locaties.html", rows=rows)
+    q = request.args.get("q", "").strip()
+    sort = request.args.get("sort", "code")
+    if sort not in LOC_SORTEER:
+        sort = "code"
+    richting = "desc" if request.args.get("dir") == "desc" else "asc"
+    sql = "SELECT l.* FROM locaties l WHERE 1 = 1"
+    params = []
+    if q:
+        sql += " AND (l.code LIKE ? OR l.naam LIKE ? OR l.plaats LIKE ?)"
+        params += [f"%{q}%"] * 3
+    kol = LOC_SORTEER[sort]
+    # lege waarden altijd onderaan; sorteren over alle locaties
+    order = (f" ORDER BY ({kol} IS NULL OR {kol} = ''), {kol} COLLATE NOCASE "
+             f"{'DESC' if richting == 'desc' else 'ASC'}, l.code")
+    db = get_db()
+    rows = db.execute(sql + order, params).fetchall()
+    relmap = {}
+    for r in db.execute("SELECT lr.locatie_id, r.id, r.code, r.name FROM locatie_relaties lr "
+                        "JOIN relaties r ON r.id = lr.relatie_id ORDER BY r.code"):
+        relmap.setdefault(r["locatie_id"], []).append(r)
+    basis = {"q": q, "sort": sort, "dir": richting}
+
+    def link(**kw):
+        d = dict(basis)
+        d.update(kw)
+        return url_for("locaties", **{x: y for x, y in d.items() if y not in ("", None)})
+
+    return render_template("locaties.html", rows=rows, q=q, kolommen=LOC_KOLOMMEN,
+                           sort=sort, dir=richting, link=link, relmap=relmap)
 
 
 @app.route("/locaties/nieuw", methods=["GET", "POST"])
@@ -1406,22 +1465,24 @@ def locatie_new():
             for e in errors:
                 flash(e)
             return render_template("locatie_form.html", c=data, title="Nieuwe locatie",
-                                   action=url_for("locatie_new"), fields=LOC_FIELDS, relaties=relatie_opties())
+                                   action=url_for("locatie_new"), fields=LOC_FIELDS,
+                                   gekozen=gekozen_relaties(data["relatie_ids"]))
         db = get_db()
         code = next_location_code()
-        db.execute(
+        cur = db.execute(
             f"INSERT INTO locaties (code, {', '.join(LOC_NAMES)}) "
             f"VALUES (?, {', '.join('?' * len(LOC_NAMES))})",
             [code] + [data[n] for n in LOC_NAMES])
+        zet_locatie_relaties(db, cur.lastrowid, data["relatie_ids"])
         db.commit()
         flash(f"Locatie {code} aangemaakt.")
         return redirect(url_for("locaties"))
     voor = request.args.get("relatie_id", "")
     start = {n: None for n in LOC_NAMES}
-    start["relatie_id"] = int(voor) if voor.isdigit() else None
+    ids = [int(voor)] if voor.isdigit() else []
     return render_template("locatie_form.html", c=start,
                            title="Nieuwe locatie", action=url_for("locatie_new"), fields=LOC_FIELDS,
-                           relaties=relatie_opties())
+                           gekozen=gekozen_relaties(ids))
 
 
 @app.route("/locaties/<int:lid>/bewerk", methods=["GET", "POST"])
@@ -1438,15 +1499,19 @@ def locatie_edit(lid):
             for e in errors:
                 flash(e)
             return render_template("locatie_form.html", c=data, title=f"Bewerk {c['code']}",
-                                   action=action, fields=LOC_FIELDS, relaties=relatie_opties())
+                                   action=action, fields=LOC_FIELDS,
+                                   gekozen=gekozen_relaties(data["relatie_ids"]))
         sets = ", ".join(f"{n} = ?" for n in LOC_NAMES)
         db.execute(f"UPDATE locaties SET {sets} WHERE id = ?",
                    [data[n] for n in LOC_NAMES] + [lid])
+        zet_locatie_relaties(db, lid, data["relatie_ids"])
         db.commit()
         flash("Locatie opgeslagen.")
         return redirect(url_for("locaties"))
+    huidig = [r["id"] for r in db.execute(
+        "SELECT relatie_id AS id FROM locatie_relaties WHERE locatie_id = ?", (lid,))]
     return render_template("locatie_form.html", c=c, title=f"Bewerk {c['code']}",
-                           action=action, fields=LOC_FIELDS, relaties=relatie_opties())
+                           action=action, fields=LOC_FIELDS, gekozen=gekozen_relaties(huidig))
 
 
 # landcode uit het voorvoegsel van de postcode in het bestand (bijvoorbeeld D-85748 of NL-7461)
@@ -1512,6 +1577,7 @@ def locatie_delete(lid):
     db = get_db()
     db.execute("UPDATE transports SET laad_locatie_id = NULL WHERE laad_locatie_id = ?", (lid,))
     db.execute("UPDATE transports SET los_locatie_id = NULL WHERE los_locatie_id = ?", (lid,))
+    db.execute("DELETE FROM locatie_relaties WHERE locatie_id = ?", (lid,))
     db.execute("DELETE FROM locaties WHERE id = ?", (lid,))
     db.commit()
     flash("Locatie verwijderd. Gekoppelde transporten hebben die locatie niet meer.")
@@ -3033,13 +3099,26 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <a class="btn" href="{{ url_for('locatie_new') }}">+ Nieuwe locatie</a>
   {% if user['role'] == 'beheerder' %}<a class="btn" href="{{ url_for('locatie_importeren') }}">Importeren uit Excel</a>{% endif %}
 </div>
+<form method="get" class="card row">
+  <input name="q" value="{{ q }}" placeholder="Zoek op code, naam of plaats" style="max-width:360px">
+  <button>Zoeken</button>
+</form>
 <table>
-<tr><th>Code</th><th>Naam</th><th>Relatie</th><th>Plaats</th><th>Land</th><th>Openingstijden</th><th></th></tr>
+<tr>
+{% for k, kop in kolommen %}
+  <th style="white-space:nowrap">{{ kop }}
+    <span style="display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;margin-left:6px;line-height:1">
+      <a href="{{ link(sort=k, dir='asc') }}" title="Oplopend sorteren" style="font-size:11px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a>
+      <a href="{{ link(sort=k, dir='desc') }}" title="Aflopend sorteren" style="font-size:11px;line-height:0.8;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
+    </span>
+  </th>
+{% endfor %}
+<th></th></tr>
 {% for l in rows %}
 <tr>
   <td>{{ l['code'] }}</td>
   <td><a href="{{ url_for('locatie_edit', lid=l['id']) }}">{{ l['naam'] }}</a></td>
-  <td>{% if l['rcode'] %}<a href="{{ url_for('relatie_detail', rid=l['relatie_id']) }}">{{ l['rcode'] }} – {{ l['rname'] }}</a>{% else %}–{% endif %}</td>
+  <td>{% for r in relmap.get(l['id'], []) %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }}</a>{% if not loop.last %}, {% endif %}{% else %}–{% endfor %}</td>
   <td>{{ l['plaats'] or '' }}</td>
   <td>{{ l['land'] or '' }}</td>
   <td style="white-space:pre-line">{{ l['openingstijden'] or '' }}</td>
@@ -3065,20 +3144,87 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       <td>
       {% if kind == 'textarea' %}
         <textarea name="{{ name }}" rows="3">{{ c[name] if c[name] is not none else '' }}</textarea>
-      {% elif kind == 'relatie' %}
-        <select name="{{ name }}">
-          <option value="">– geen –</option>
-          {% for r in relaties %}<option value="{{ r['id'] }}" {% if c[name] == r['id'] %}selected{% endif %}>{{ r['code'] }} – {{ r['name'] }}</option>{% endfor %}
-        </select>
       {% else %}
         <input type="text" name="{{ name }}" value="{{ c[name] if c[name] is not none else '' }}">
       {% endif %}
       </td>
     </tr>
   {% endfor %}
+    <tr>
+      <th>Opdrachtgevers</th>
+      <td>
+        <div id="lr_chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+        {% for r in gekozen %}
+          <span class="chip" style="display:inline-flex;align-items:center;gap:4px;background:#e1dfdd;border-radius:12px;padding:2px 4px 2px 10px">
+            {{ r['code'] }} – {{ r['name'] }}
+            <button type="button" onclick="lrWis(this)" title="Verwijderen" style="padding:0 6px">×</button>
+            <input type="hidden" name="relatie_ids" value="{{ r['id'] }}">
+          </span>
+        {% else %}
+          <span style="color:#605e5c">Nog geen opdrachtgever gekoppeld.</span>
+        {% endfor %}
+        </div>
+        <input type="text" id="lr_zoek" placeholder="Zoek opdrachtgever op naam" style="max-width:360px" autocomplete="off">
+        <div id="lr_lijst" style="margin-top:6px"></div>
+      </td>
+    </tr>
   </table>
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('locaties') }}">Annuleren</a></p>
 </form>
+<script>
+const LR_CHIP_STIJL = 'display:inline-flex;align-items:center;gap:4px;background:#e1dfdd;border-radius:12px;padding:2px 4px 2px 10px';
+let lrTimer = null;
+document.getElementById('lr_zoek').addEventListener('input', function () {
+  clearTimeout(lrTimer);
+  const v = this.value.trim();
+  lrTimer = setTimeout(function () { lrOphalen(v); }, 250);
+});
+async function lrOphalen(v) {
+  const lijst = document.getElementById('lr_lijst');
+  lijst.textContent = '';
+  if (v.length < 2) return;
+  const res = await fetch('/api/relaties/zoek?soort=opdrachtgever&naam=' + encodeURIComponent(v));
+  const data = await res.json();
+  if (data.lijst.length === 0) { lijst.textContent = 'Geen opdrachtgevers gevonden.'; return; }
+  data.lijst.forEach(function (r) {
+    const knop = document.createElement('button');
+    knop.type = 'button';
+    knop.style.display = 'block';
+    knop.style.margin = '2px 0';
+    knop.textContent = '+ ' + r.code + ' – ' + r.name + (r.plaats ? ', ' + r.plaats : '');
+    knop.onclick = function () { lrVoegToe(r); };
+    lijst.appendChild(knop);
+  });
+  if (data.meer) lijst.appendChild(document.createTextNode('Meer dan 200 treffers, verfijn de zoekterm.'));
+}
+function lrVoegToe(r) {
+  const bestaand = document.querySelectorAll('#lr_chips input[name=relatie_ids]');
+  for (const i of bestaand) { if (i.value === String(r.id)) return; }
+  const chips = document.getElementById('lr_chips');
+  const leeg = chips.querySelector('span:not(.chip)');
+  if (leeg) leeg.remove();
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.style.cssText = LR_CHIP_STIJL;
+  chip.appendChild(document.createTextNode(r.code + ' – ' + r.name + ' '));
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.title = 'Verwijderen';
+  x.style.padding = '0 6px';
+  x.textContent = '×';
+  x.onclick = function () { lrWis(x); };
+  const h = document.createElement('input');
+  h.type = 'hidden';
+  h.name = 'relatie_ids';
+  h.value = r.id;
+  chip.appendChild(x);
+  chip.appendChild(h);
+  chips.appendChild(chip);
+  document.getElementById('lr_zoek').value = '';
+  document.getElementById('lr_lijst').textContent = '';
+}
+function lrWis(knop) { knop.parentElement.remove(); }
+</script>
 {% endblock %}""",
 
 "beheer.html": """{% extends "base.html" %}{% block content %}

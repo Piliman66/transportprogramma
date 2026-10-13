@@ -310,6 +310,15 @@ def init_db():
         if name not in have:
             sqltype = "INTEGER" if kind in ("bool", "rel_locatie") else "TEXT"
             db.execute(f"ALTER TABLE transports ADD COLUMN {name} {sqltype}")
+    # versie 4: de proeflocaties L0001 t/m L0004 verwijderen (transporten houden hun overige gegevens)
+    if db.execute("PRAGMA user_version").fetchone()[0] < 4:
+        for code in ("L0001", "L0002", "L0003", "L0004", "L00001", "L00002", "L00003", "L00004"):
+            db.execute("UPDATE transports SET laad_locatie_id = NULL WHERE laad_locatie_id IN "
+                       "(SELECT id FROM locaties WHERE code = ?)", (code,))
+            db.execute("UPDATE transports SET los_locatie_id = NULL WHERE los_locatie_id IN "
+                       "(SELECT id FROM locaties WHERE code = ?)", (code,))
+            db.execute("DELETE FROM locaties WHERE code = ?", (code,))
+        db.execute("PRAGMA user_version = 4")
     # oude laadvelden eenmalig overzetten naar de tabel laadregels
     db.execute("""INSERT INTO laadregels (transport_id, volgorde, ref, aantal, eenheid, omschrijving, gewicht, ldm)
         SELECT id, 1, laad_ref, colli, laad_eenheid, goods_type, weight_kg, ldm FROM transports
@@ -383,7 +392,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.62 - 13-10-2026 22:40"
+APP_VERSIE = "1.63 - 13-10-2026 22:52"
 
 
 @app.after_request
@@ -1357,6 +1366,63 @@ def locatie_edit(lid):
         return redirect(url_for("locaties"))
     return render_template("locatie_form.html", c=c, title=f"Bewerk {c['code']}",
                            action=action, fields=LOC_FIELDS, relaties=relatie_opties())
+
+
+# landcode uit het voorvoegsel van de postcode in het bestand (bijvoorbeeld D-85748 of NL-7461)
+LOC_LAND_VOORVOEGSEL = {"D": "DE", "NL": "NL", "B": "BE", "BE": "BE", "F": "FR", "FR": "FR", "L": "LU",
+                        "LU": "LU", "A": "AT", "SE": "SE", "I": "IT", "CH": "CH", "DK": "DK", "PL": "PL",
+                        "GB": "GB"}
+
+
+def importeer_locaties(bestand):
+    """Leest de laad- en losplaatsen uit Excel. De kolom 'Laad-/losplaats' wordt de locatiecode.
+    Bestaande codes worden overgeslagen. Geeft (toegevoegd, overgeslagen per reden) terug."""
+    import openpyxl  # alleen nodig bij importeren
+    wb = openpyxl.load_workbook(bestand, read_only=True, data_only=True)
+    rijen = wb.worksheets[0].iter_rows(values_only=True)
+    next(rijen)  # kopregel
+    db = get_db()
+    bestaand = {r["code"] for r in db.execute("SELECT code FROM locaties")}
+    toegevoegd = 0
+    overgeslagen = {"bestaat al": 0, "geen code of naam": 0}
+    for rij in rijen:
+        def tekst(i):
+            if i >= len(rij) or rij[i] is None:
+                return None
+            return str(rij[i]).strip() or None
+        naam, code, adres, postcode, plaats = tekst(0), tekst(1), tekst(2), tekst(3), tekst(4)
+        if not code or not naam:
+            overgeslagen["geen code of naam"] += 1
+            continue
+        if code in bestaand:
+            overgeslagen["bestaat al"] += 1
+            continue
+        land = None
+        m = re.fullmatch(r"([A-Za-z]{1,2})[- ]\s*(.+)", postcode or "")
+        if m and m.group(1).upper() in LOC_LAND_VOORVOEGSEL:
+            land = LOC_LAND_VOORVOEGSEL[m.group(1).upper()]
+            postcode = m.group(2).strip()
+        db.execute("INSERT INTO locaties (code, naam, adres, postcode, plaats, land) VALUES (?, ?, ?, ?, ?, ?)",
+                   (code, naam, adres, postcode, plaats, land))
+        bestaand.add(code)
+        toegevoegd += 1
+    db.commit()
+    return toegevoegd, overgeslagen
+
+
+@app.route("/locaties/importeren", methods=["GET", "POST"])
+@admin_required
+def locatie_importeren():
+    if request.method == "POST":
+        bestand = request.files.get("bestand")
+        if not bestand or not bestand.filename.lower().endswith(".xlsx"):
+            flash("Kies een Excel-bestand (.xlsx).")
+            return redirect(url_for("locatie_importeren"))
+        toegevoegd, overgeslagen = importeer_locaties(bestand)
+        flash(f"Toegevoegd: {toegevoegd} locaties. Overgeslagen: " +
+              ", ".join(f"{v} {k}" for k, v in overgeslagen.items() if v) + ".")
+        return redirect(url_for("locaties"))
+    return render_template("locaties_import.html")
 
 
 @app.route("/locaties/<int:lid>/verwijder", methods=["POST"])
@@ -2545,6 +2611,22 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 </p>
 {% endblock %}""",
 
+"locaties_import.html": """{% extends "base.html" %}{% block content %}
+<h2>Locaties importeren uit Excel</h2>
+<div class="card">
+<p>Kies het Excel-bestand (.xlsx) met de laad- en losplaatsen.</p>
+<ul>
+<li>De kolom <strong>Laad-/losplaats</strong> wordt de locatiecode (de bestaande zoekcode).</li>
+<li>Locaties met een code die al bestaat, worden overgeslagen.</li>
+<li>Het landvoorvoegsel van de postcode (bijvoorbeeld D- of NL-) wordt het land; de postcode wordt zonder voorvoegsel opgeslagen.</li>
+</ul>
+<form method="post" enctype="multipart/form-data" class="row">
+  <input type="file" name="bestand" accept=".xlsx" required style="max-width:420px">
+  <button>Importeren</button>
+</form>
+</div>
+{% endblock %}""",
+
 "relaties_import.html": """{% extends "base.html" %}{% block content %}
 <h2>Relaties importeren uit Excel</h2>
 <div class="card">
@@ -2710,6 +2792,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <div class="row">
   <h2>Locaties (laad- en losplaatsen)</h2>
   <a class="btn" href="{{ url_for('locatie_new') }}">+ Nieuwe locatie</a>
+  {% if user['role'] == 'beheerder' %}<a class="btn" href="{{ url_for('locatie_importeren') }}">Importeren uit Excel</a>{% endif %}
 </div>
 <table>
 <tr><th>Code</th><th>Naam</th><th>Relatie</th><th>Plaats</th><th>Land</th><th>Openingstijden</th><th></th></tr>

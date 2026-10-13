@@ -340,7 +340,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.46 - 13-10-2026 20:35"
+APP_VERSIE = "1.47 - 13-10-2026 20:58"
 
 
 @app.after_request
@@ -943,6 +943,11 @@ def transport_delete(tid):
 
 # ---------- routes: relaties (vervoerders en opdrachtgevers) ----------
 
+# kolommen in het relatieoverzicht: (databasekolom, kop); alleen deze mogen gesorteerd/gefilterd worden
+RELATIE_KOLOMMEN = [("code", "Code"), ("name", "Naam"), ("btw_nummer", "BTW nummer"),
+                    ("visit_city", "Plaats"), ("telefoon", "Telefoon"),
+                    ("email_planning", "E-mail planning")]
+
 @app.route("/relaties")
 @login_required
 def relaties():
@@ -958,6 +963,18 @@ def relaties():
                     "email", "email_planning", "email_boekhouding"]
         sql += " AND (" + " OR ".join(f"{k} LIKE ?" for k in kolommen) + ")"
         params += [f"%{q}%"] * len(kolommen)
+    # per-kolom filter (tekst bevat) en sorteren; alleen vaste kolomnamen uit RELATIE_KOLOMMEN
+    kolom_filters = {}
+    for k, _ in RELATIE_KOLOMMEN:
+        waarde = request.args.get("f_" + k, "").strip()
+        kolom_filters[k] = waarde
+        if waarde:
+            sql += f" AND {k} LIKE ?"
+            params.append(f"%{waarde}%")
+    sort = request.args.get("sort", "name")
+    if sort not in dict(RELATIE_KOLOMMEN):
+        sort = "name"
+    richting = "desc" if request.args.get("dir") == "desc" else "asc"
     db = get_db()
     aantal = db.execute("SELECT COUNT(*) FROM (" + sql + ")", params).fetchone()[0]
     pagina_grootte = 100
@@ -966,11 +983,25 @@ def relaties():
         pagina = min(max(1, int(request.args.get("pagina", 1))), pages)
     except ValueError:
         pagina = 1
-    rows = db.execute(sql + " ORDER BY name LIMIT ? OFFSET ?",
+    # lege waarden altijd onderaan; sorteren op de hele lijst (niet alleen de pagina)
+    order = (f"({sort} IS NULL OR {sort} = ''), {sort} COLLATE NOCASE "
+             f"{'DESC' if richting == 'desc' else 'ASC'}, name COLLATE NOCASE")
+    rows = db.execute(sql + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                       params + [pagina_grootte, (pagina - 1) * pagina_grootte]).fetchall()
+
+    basis = {"soort": soort, "q": q, "sort": sort, "dir": richting}
+    basis.update({"f_" + k: v for k, v in kolom_filters.items()})
+
+    def link(**kw):
+        d = dict(basis)
+        d.update(kw)
+        return url_for("relaties", **{x: y for x, y in d.items() if y not in ("", None)})
+
     title = SOORTEN[soort][1] + "s" if soort in SOORTEN else "Relaties"
     return render_template("relaties.html", rows=rows, q=q, soort=soort, title=title,
-                           aantal=aantal, pagina=pagina, pages=pages)
+                           aantal=aantal, pagina=pagina, pages=pages,
+                           kolommen=RELATIE_KOLOMMEN, kolom_filters=kolom_filters,
+                           sort=sort, dir=richting, link=link)
 
 
 # ---------- zoeken en gegevens voor het transportformulier (zonder alle relaties in de pagina) ----------
@@ -2408,8 +2439,26 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <input name="q" value="{{ q }}" placeholder="Zoek op code, naam, plaats, BTW nummer of e-mail" style="max-width:360px">
   <button>Zoeken</button>
 </form>
+<form method="get" id="kolomfilter">
+<input type="hidden" name="soort" value="{{ soort }}">
+<input type="hidden" name="q" value="{{ q }}">
+<input type="hidden" name="sort" value="{{ sort }}">
+<input type="hidden" name="dir" value="{{ dir }}">
 <table>
-<tr><th>Code</th><th>Naam</th><th>BTW nummer</th><th>Plaats</th><th>Telefoon</th><th>E-mail planning</th></tr>
+<tr>
+{% for k, kop in kolommen %}
+  <th style="white-space:nowrap">{{ kop }}
+    <span style="margin-left:6px;white-space:nowrap">
+      <a href="{{ link(sort=k, dir='asc', pagina=1) }}" title="Oplopend sorteren" style="font-size:11px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'asc' else '#a19f9d' }}">▲</a><a href="{{ link(sort=k, dir='desc', pagina=1) }}" title="Aflopend sorteren" style="font-size:11px;text-decoration:none;color:{{ '#0078d4' if sort == k and dir == 'desc' else '#a19f9d' }}">▼</a>
+    </span>
+  </th>
+{% endfor %}
+</tr>
+<tr>
+{% for k, kop in kolommen %}
+  <td style="padding:4px"><input name="f_{{ k }}" value="{{ kolom_filters[k] }}" placeholder="filter" style="width:100%;min-width:0;box-sizing:border-box;padding:4px;font-size:13px"></td>
+{% endfor %}
+</tr>
 {% for c in rows %}
 <tr>
   <td>{{ c['code'] }}</td>
@@ -2423,11 +2472,14 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <tr><td colspan="6">Nog niets gevonden.</td></tr>
 {% endfor %}
 </table>
-<p style="display:flex;gap:12px;align-items:center">
+<p style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <button>Filter toepassen</button>
+  <a href="{{ link(f_code='', f_name='', f_btw_nummer='', f_visit_city='', f_telefoon='', f_email_planning='', pagina=1) }}">Wis filters</a>
   <span>{{ aantal }} relaties{% if pages > 1 %}, pagina {{ pagina }} van {{ pages }}{% endif %}</span>
-  {% if pagina > 1 %}<a href="{{ url_for('relaties', soort=soort, q=q, pagina=pagina-1) }}">‹ Vorige</a>{% endif %}
-  {% if pagina < pages %}<a href="{{ url_for('relaties', soort=soort, q=q, pagina=pagina+1) }}">Volgende ›</a>{% endif %}
+  {% if pagina > 1 %}<a href="{{ link(pagina=pagina-1) }}">‹ Vorige</a>{% endif %}
+  {% if pagina < pages %}<a href="{{ link(pagina=pagina+1) }}">Volgende ›</a>{% endif %}
 </p>
+</form>
 {% endblock %}""",
 
 "relaties_import.html": """{% extends "base.html" %}{% block content %}

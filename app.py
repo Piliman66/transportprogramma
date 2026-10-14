@@ -400,7 +400,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.69 - 13-10-2026 23:45"
+APP_VERSIE = "1.71 - 14-10-2026 17:55"
 
 
 @app.after_request
@@ -837,8 +837,8 @@ def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
-           "ll.plaats AS laad_plaats, ll.postcode AS laad_postcode, "
-           "lo.plaats AS los_plaats, lo.postcode AS los_postcode FROM transports t "
+           "ll.land AS laad_land, ll.postcode AS laad_postcode, ll.plaats AS laad_plaats, "
+           "lo.land AS los_land, lo.postcode AS los_postcode, lo.plaats AS los_plaats FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
            "LEFT JOIN relaties c ON c.id = t.carrier_id "
            "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
@@ -864,7 +864,7 @@ def transports():
                            kolom_standaard=kolom_standaard())
 
 
-OVERZICHT_KOLOMMEN = 13  # aantal kolommen in het overzicht Transporten
+OVERZICHT_KOLOMMEN = 11  # aantal kolommen in het overzicht Transporten
 
 
 def kolom_standaard():
@@ -1907,7 +1907,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <button>Zoeken</button>
 </form>
 <table class="een-regel">
-<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Postcode laden</th><th>Losplaats</th><th>Postcode lossen</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
+<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
@@ -1916,16 +1916,14 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
   <td>{{ t['referentie'] or '' }}</td>
-  <td>{{ t['laad_plaats'] or '' }}</td>
-  <td>{{ t['laad_postcode'] or '' }}</td>
-  <td>{{ t['los_plaats'] or '' }}</td>
-  <td>{{ t['los_postcode'] or '' }}</td>
+  <td>{{ [t['laad_land'], t['laad_postcode'], t['laad_plaats']]|select|join(' | ') }}</td>
+  <td>{{ [t['los_land'], t['los_postcode'], t['los_plaats']]|select|join(' | ') }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="13">Nog geen transporten gevonden.</td></tr>
+<tr><td colspan="11">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
 <dialog id="dlg_datum" style="border:none;border-radius:8px;padding:16px;width:min(340px,92vw)">
@@ -2406,7 +2404,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
         <input id="nl_adres" placeholder="Adres">
         <input id="nl_postcode" placeholder="Postcode">
         <input id="nl_plaats" placeholder="Plaats">
-        <input id="nl_land" placeholder="Land (bijvoorbeeld NL)">
+        <select id="nl_land">
+          <option value="">– kies landcode –</option>
+          {% for code, naam in LANDCODE_OPTIES %}<option value="{{ code }}" {% if code == 'NL' %}selected{% endif %}>{{ naam }}</option>{% endfor %}
+        </select>
       </div>
       <p id="nl_fout" style="color:#a4262c;margin:6px 0 0"></p>
       <p style="text-align:right;margin:8px 0 0"><button type="button" onclick="slaNieuweLocOp()">Opslaan en kiezen</button></p>
@@ -2673,7 +2674,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       fout.textContent = data.fout || 'Opslaan is mislukt.';
       return;
     }
-    ['nl_naam', 'nl_adres', 'nl_postcode', 'nl_plaats', 'nl_land'].forEach(id => { document.getElementById(id).value = ''; });
+    ['nl_naam', 'nl_adres', 'nl_postcode', 'nl_plaats'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('nl_land').value = 'NL';
     document.getElementById('loc_nieuw').style.display = 'none';
     await kiesLoc(data);
   }

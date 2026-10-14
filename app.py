@@ -283,6 +283,19 @@ LANDCODES = [
 ]
 
 
+def postcode_met_land(postcode, land):
+    """Postcode in de vorm 'DE 41468': de landcode (twee letters) voor de postcode, een eventueel
+    bestaand voorvoegsel wordt vervangen. Zonder landcode blijft de postcode zoals hij is."""
+    pc = (postcode or "").strip()
+    m = re.fullmatch(r"[A-Za-z]{1,3}[- ]\s*(.+)", pc)
+    if m:
+        pc = m.group(1).strip()
+    if not pc:
+        return None
+    lc = (land or "").strip().upper()
+    return f"{lc} {pc}" if re.fullmatch(r"[A-Z]{2}", lc) else pc
+
+
 def init_db():
     """Maakt tabellen aan. Maakt een beheerder aan als er nog geen gebruikers zijn
     en de omgevingsvariabele ADMIN_PASSWORD is gezet."""
@@ -359,6 +372,13 @@ def init_db():
         db.execute("INSERT OR IGNORE INTO locatie_relaties (locatie_id, relatie_id) "
                    "SELECT id, relatie_id FROM locaties WHERE relatie_id IS NOT NULL")
         db.execute("PRAGMA user_version = 5")
+    # versie 6: de landcode staat voor de postcode ('DE 41468'), ook bij bestaande locaties
+    if db.execute("PRAGMA user_version").fetchone()[0] < 6:
+        for lid, pc, land in db.execute("SELECT id, postcode, land FROM locaties").fetchall():
+            nieuw = postcode_met_land(pc, land)
+            if nieuw != pc:
+                db.execute("UPDATE locaties SET postcode = ? WHERE id = ?", (nieuw, lid))
+        db.execute("PRAGMA user_version = 6")
     have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
     for name, _, kind in RELATION_FIELDS:
         if name not in have_rel:
@@ -400,7 +420,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.71 - 14-10-2026 17:55"
+APP_VERSIE = "1.73 - 14-10-2026 18:20"
 
 
 @app.after_request
@@ -517,6 +537,13 @@ def parse_relation_form():
 DATUM_NAMES = {n for n, _, k in TRANSPORT_FIELDS if k in ("date", "datetime")}
 ISO_DATUM_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?")
 NL_DATUM_RE = re.compile(r"(\d{1,2})-(\d{1,2})-(\d{4})(?:[ T](\d{1,2}):(\d{2}))?")
+
+
+@app.template_filter("pc_kort")
+def pc_kort(waarde):
+    """Nederlandse postcode in het transportoverzicht zonder de twee letters: 'NL 1011 AB' wordt 'NL 1011'."""
+    m = re.fullmatch(r"NL\s*(\d{4})\s*[A-Za-z]{2}", waarde or "")
+    return f"NL {m.group(1)}" if m else (waarde or "")
 
 
 @app.template_filter("nl_datum")
@@ -837,8 +864,8 @@ def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
-           "ll.land AS laad_land, ll.postcode AS laad_postcode, ll.plaats AS laad_plaats, "
-           "lo.land AS los_land, lo.postcode AS los_postcode, lo.plaats AS los_plaats FROM transports t "
+           "ll.plaats AS laad_plaats, ll.postcode AS laad_postcode, "
+           "lo.plaats AS los_plaats, lo.postcode AS los_postcode FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
            "LEFT JOIN relaties c ON c.id = t.carrier_id "
            "LEFT JOIN locaties ll ON ll.id = t.laad_locatie_id "
@@ -864,7 +891,7 @@ def transports():
                            kolom_standaard=kolom_standaard())
 
 
-OVERZICHT_KOLOMMEN = 11  # aantal kolommen in het overzicht Transporten
+OVERZICHT_KOLOMMEN = 13  # aantal kolommen in het overzicht Transporten
 
 
 def kolom_standaard():
@@ -1144,6 +1171,7 @@ def api_locatie_nieuw():
     velden = {k: (str(gegevens.get(k) or "").strip() or None) for k in ("naam", "adres", "postcode", "plaats", "land")}
     if not velden["naam"]:
         return jsonify({"fout": "Vul de naam van de locatie in."}), 400
+    velden["postcode"] = postcode_met_land(velden["postcode"], velden["land"])
     db = get_db()
     basis = locatie_code_basis(velden["naam"], velden["plaats"]) or "LOC"
     code, teller = basis, 1
@@ -1408,6 +1436,7 @@ def parse_location_form():
         if x.isdigit() and int(x) not in ids:
             ids.append(int(x))
     data["relatie_ids"] = ids
+    data["postcode"] = postcode_met_land(data["postcode"], data["land"])
     errors = [] if data["naam"] else ["Naam is verplicht."]
     return data, errors
 
@@ -1555,6 +1584,7 @@ def importeer_locaties(bestand):
         if m and m.group(1).upper() in LOC_LAND_VOORVOEGSEL:
             land = LOC_LAND_VOORVOEGSEL[m.group(1).upper()]
             postcode = m.group(2).strip()
+        postcode = postcode_met_land(postcode, land)
         db.execute("INSERT INTO locaties (code, naam, adres, postcode, plaats, land) VALUES (?, ?, ?, ?, ?, ?)",
                    (code, naam, adres, postcode, plaats, land))
         bestaand.add(code)
@@ -1907,7 +1937,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <button>Zoeken</button>
 </form>
 <table class="een-regel">
-<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Losplaats</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
+<tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Postcode laden</th><th>Losplaats</th><th>Postcode lossen</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
@@ -1916,14 +1946,16 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>
   <td>{{ t['referentie'] or '' }}</td>
-  <td>{{ [t['laad_land'], t['laad_postcode'], t['laad_plaats']]|select|join(' | ') }}</td>
-  <td>{{ [t['los_land'], t['los_postcode'], t['los_plaats']]|select|join(' | ') }}</td>
+  <td>{{ t['laad_plaats'] or '' }}</td>
+  <td>{{ (t['laad_postcode'] or '')|pc_kort }}</td>
+  <td>{{ t['los_plaats'] or '' }}</td>
+  <td>{{ (t['los_postcode'] or '')|pc_kort }}</td>
   <td>{{ t['carrier_name'] or '' }}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="11">Nog geen transporten gevonden.</td></tr>
+<tr><td colspan="13">Nog geen transporten gevonden.</td></tr>
 {% endfor %}
 </table>
 <dialog id="dlg_datum" style="border:none;border-radius:8px;padding:16px;width:min(340px,92vw)">
@@ -2404,10 +2436,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
         <input id="nl_adres" placeholder="Adres">
         <input id="nl_postcode" placeholder="Postcode">
         <input id="nl_plaats" placeholder="Plaats">
-        <select id="nl_land">
-          <option value="">– kies landcode –</option>
-          {% for code, naam in LANDCODE_OPTIES %}<option value="{{ code }}" {% if code == 'NL' %}selected{% endif %}>{{ naam }}</option>{% endfor %}
-        </select>
+        <input id="nl_land" placeholder="Land (bijvoorbeeld NL)">
       </div>
       <p id="nl_fout" style="color:#a4262c;margin:6px 0 0"></p>
       <p style="text-align:right;margin:8px 0 0"><button type="button" onclick="slaNieuweLocOp()">Opslaan en kiezen</button></p>
@@ -2674,8 +2703,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       fout.textContent = data.fout || 'Opslaan is mislukt.';
       return;
     }
-    ['nl_naam', 'nl_adres', 'nl_postcode', 'nl_plaats'].forEach(id => { document.getElementById(id).value = ''; });
-    document.getElementById('nl_land').value = 'NL';
+    ['nl_naam', 'nl_adres', 'nl_postcode', 'nl_plaats', 'nl_land'].forEach(id => { document.getElementById(id).value = ''; });
     document.getElementById('loc_nieuw').style.display = 'none';
     await kiesLoc(data);
   }

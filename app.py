@@ -459,7 +459,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.85 - 14-10-2026 23:30"
+APP_VERSIE = "1.89 - 14-10-2026 23:50"
 
 
 @app.after_request
@@ -2286,7 +2286,16 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 
 "transport_form.html": """{% extends "base.html" %}{% block content %}
 <h2>{{ title }}</h2>
-<form method="post" action="{{ action }}" class="card">
+<form method="post" action="{{ action }}" class="card tf-compact">
+<style>
+  .tf-compact { font-size: 13px; padding: 10px; }
+  .tf-compact .tf-grid { gap: 6px 10px; grid-template-columns: 150px 1fr 150px 1fr; }
+  .tf-compact .tf-grid .lbl { font-size: 13px; }
+  .tf-compact input, .tf-compact select, .tf-compact textarea { padding: 3px 6px; font-size: 13px; }
+  .tf-compact button { padding: 3px 10px; font-size: 13px; }
+  .tf-compact .tf-sec { padding: 3px 6px; margin-top: 6px; font-size: 13px; }
+  .tf-compact summary { padding: 4px 0 !important; }
+</style>
 {% macro ctl(name, span=False) %}
   {% if F[name][1] == 'textarea' %}
     <textarea name="{{ name }}" rows="2" class="{{ 'span3' if span }}">{{ t[name] or '' }}</textarea>
@@ -2355,7 +2364,24 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {{ f('afdeling') }}
   {{ f('referentie') }}
   {{ f('invoice_status') }}
+  <span></span><span></span>
   {{ f('notes', True) }}
+
+  {{ f('status') }}
+  <span class="lbl">Tijdstip</span>
+  <div>
+    <select name="status_tijd" id="status_tijd">
+      <option value="">—</option>
+      {% for tj in TIJD_OPTIES %}<option value="{{ tj }}" {% if t['status_tijd'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
+  </div>
+
+  <span class="lbl">Tekst in het veld</span>
+  <div>
+    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}">
+    <span id="status_opm_dash" style="display:none;padding:8px">–</span>
+  </div>
 
   <div class="tf-sec">Opdrachtgever</div>
   <span class="lbl">Opdrachtgever</span>
@@ -2409,20 +2435,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
 
-  {{ f('status') }}
-  <span class="lbl">Tijdstip</span>
-  <div>
-    <select name="status_tijd" id="status_tijd">
-      <option value="">—</option>
-      {% for tj in TIJD_OPTIES %}<option value="{{ tj }}" {% if t['status_tijd'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
-    </select>
-    <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
-  </div>
-  <span class="lbl">Tekst in het veld</span>
-  <div>
-    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}">
-    <span id="status_opm_dash" style="display:none;padding:8px">–</span>
-  </div>
 
   {{ f('price') }}
 

@@ -459,7 +459,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.81 - 14-10-2026 23:05"
+APP_VERSIE = "1.83 - 14-10-2026 23:20"
 
 
 @app.after_request
@@ -2355,21 +2355,21 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {{ f('afdeling') }}
   {{ f('referentie') }}
 
-  <div class="tf-sec">Debiteur en Vervoerder</div>
-  <span class="lbl">Debiteur</span>
+  <div class="tf-sec">Opdrachtgever</div>
+  <span class="lbl">Opdrachtgever</span>
   <div style="display:flex;gap:6px">
-    <input id="cust_naam" readonly value="{{ relations['cust_label'] }}" placeholder="— kies een debiteur —" style="flex:1">
+    <input id="cust_naam" readonly value="{{ relations['cust_label'] }}" placeholder="— kies een opdrachtgever —" style="flex:1">
     <input type="hidden" name="customer_id" value="{{ t['customer_id'] or '' }}">
     <button type="button" onclick="openRelZoek('customer_id')">Zoeken…</button>
-    <button type="button" onclick="wisRel('customer_id')" title="Debiteur verwijderen">Wis</button>
+    <button type="button" onclick="wisRel('customer_id')" title="Opdrachtgever verwijderen">Wis</button>
   </div>
-  <span class="lbl">Naam debiteur</span>
+  <span class="lbl">Naam opdrachtgever</span>
   <input id="c_name" readonly>
 
   <details style="grid-column:1 / -1">
-    <summary style="cursor:pointer;padding:8px 0"><strong>Details</strong> (adres en contact debiteur)</summary>
+    <summary style="cursor:pointer;padding:8px 0"><strong>Details</strong> (adres en contact opdrachtgever)</summary>
     <div class="tf-grid" style="margin-top:8px">
-      <span class="lbl">Adres debiteur</span>
+      <span class="lbl">Adres opdrachtgever</span>
       <input id="c_adres" readonly>
       <span class="lbl">Postcode / plaats</span>
       <input id="c_plaats" readonly>
@@ -2381,6 +2381,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     </div>
   </details>
 
+  <div class="tf-sec">Vervoerder</div>
   <span class="lbl">Vervoerder</span>
   <div style="display:flex;gap:6px">
     <input id="carr_naam" readonly value="{{ relations['carr_label'] }}" placeholder="— kies een vervoerder —" style="flex:1">
@@ -2390,7 +2391,18 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <span class="lbl">Naam vervoerder</span>
   <input id="v_name" readonly>
+  <span class="lbl">Telefoon vervoerder</span>
+  <input id="v_tel" readonly>
   {{ f('email_planning') }}
+  <details style="grid-column:1 / -1">
+    <summary style="cursor:pointer;padding:8px 0"><strong>Details</strong> (adres en postcode vervoerder)</summary>
+    <div class="tf-grid" style="margin-top:8px">
+      <span class="lbl">Adres vervoerder</span>
+      <input id="v_adres" readonly>
+      <span class="lbl">Postcode / plaats</span>
+      <input id="v_plaats" readonly>
+    </div>
+  </details>
 
   {{ f('vehicle_plate') }}
   {{ f('oplegger') }}
@@ -2586,7 +2598,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <p><button>Opslaan</button> <a href="{{ url_for('transports') }}">Annuleren</a></p>
 </form>
 <dialog id="dlg_deb" style="width:min(640px,92vw);border:none;border-radius:8px;padding:20px">
-  <h3 id="deb_titel" style="margin-top:0">Debiteur zoeken</h3>
+  <h3 id="deb_titel" style="margin-top:0">Opdrachtgever zoeken</h3>
   <div style="display:grid;gap:8px">
     <input id="deb_naam" placeholder="Naam" oninput="zoekDebVertraagd()">
     <input id="deb_plaats" placeholder="Plaats" oninput="zoekDebVertraagd()">
@@ -2624,7 +2636,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   const REL = {{ rels|tojson }};
   // zoeken in relaties gebeurt op de server; de gegevens van een relatie worden opgehaald als je die kiest
   const ZOEK = {
-    customer_id: {titel: 'Debiteur zoeken', soort: 'opdrachtgever', label: 'cust_naam'},
+    customer_id: {titel: 'Opdrachtgever zoeken', soort: 'opdrachtgever', label: 'cust_naam'},
     carrier_id: {titel: 'Vervoerder zoeken', soort: 'vervoerder', label: 'carr_naam'}
   };
   let zoekVeld = 'customer_id';
@@ -2731,6 +2743,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   async function showCarrier(init) {
     const r = await haalRel(byName('carrier_id').value);
     setVal('v_name', r && r.name);
+    setVal('v_adres', r && r.visit_adres);
+    setVal('v_plaats', r && ((r.visit_postcode || '') + ' ' + (r.visit_city || '')).trim());
+    setVal('v_tel', r && r.telefoon);
     // status volgt de vervoerder: zonder vervoerder 'nog indelen', met vervoerder 'ingedeeld'
     const st = byName('status');
     if (!init && st && (st.value === 'nog indelen' || st.value === 'ingedeeld')) {

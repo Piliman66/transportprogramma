@@ -420,7 +420,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.73 - 14-10-2026 18:20"
+APP_VERSIE = "1.74 - 14-10-2026 18:30"
 
 
 @app.after_request
@@ -877,7 +877,7 @@ def transports():
         m = re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})", q)
         if m:
             datum = f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
-        sql += (" AND (t.number LIKE ? OR t.date LIKE ? OR cu.name LIKE ? OR t.receiver LIKE ?"
+        sql += (" AND (t.number LIKE ? OR COALESCE(t.laad_datum, t.date) LIKE ? OR cu.name LIKE ? OR t.receiver LIKE ?"
                 " OR c.name LIKE ? OR t.vehicle_plate LIKE ?"
                 " OR ll.code LIKE ? OR lo.code LIKE ?"
                 " OR ll.naam LIKE ? OR ll.plaats LIKE ? OR lo.naam LIKE ? OR lo.plaats LIKE ?)")
@@ -885,7 +885,7 @@ def transports():
     if status in STATUSES:
         sql += " AND t.status = ?"
         params.append(status)
-    sql += " ORDER BY COALESCE(t.date, t.created_at) DESC, t.id DESC"
+    sql += " ORDER BY COALESCE(t.laad_datum, t.date, t.created_at) DESC, t.id DESC"
     rows = get_db().execute(sql, params).fetchall()
     return render_template("transports.html", rows=rows, q=q, status=status,
                            kolom_standaard=kolom_standaard())
@@ -1941,7 +1941,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 {% for t in rows %}
 <tr>
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
-  <td data-iso="{{ (t['date'] or '')[:10] }}" title="{{ t['date']|nl_datum }}">{{ (t['date']|nl_datum)[:10] }}</td>
+  <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
   <td>{{ t['customer_name'] or '' }}</td>

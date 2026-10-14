@@ -198,6 +198,12 @@ CREATE TABLE IF NOT EXISTS voertuig_lading_opties (
 INSERT OR IGNORE INTO voertuig_lading_opties (naam) VALUES
     ('Antislip-Matten'), ('Boordwanden'), ('Kantbeschermers'), ('Katrollen'), ('Klembalken'),
     ('Palletvasthoudstang'), ('Plaat met gaten'), ('Spanbanden'), ('Spankettingen');
+CREATE TABLE IF NOT EXISTS transport_voertuigeisen (
+    transport_id INTEGER NOT NULL REFERENCES transports(id),
+    soort TEXT NOT NULL,
+    naam TEXT NOT NULL,
+    PRIMARY KEY (transport_id, soort, naam)
+);
 CREATE TABLE IF NOT EXISTS laadregels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
@@ -453,7 +459,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.78 - 14-10-2026 22:30"
+APP_VERSIE = "1.79 - 14-10-2026 22:50"
 
 
 @app.after_request
@@ -613,6 +619,50 @@ def parse_nl_datum(raw):
 
 # ---------- hulpfuncties transporten ----------
 
+# voertuigeisen op het transport: soort 'voertuigtype' en 'opbouwtype' komen uit de lijsten in Beheer,
+# de eigenschappen (opbouw, uitrusting, lading) uit de drie lijsten onder Voertuig eigenschappen
+VOERTUIG_SOORTEN = {"voertuigtype": "Voertuigtype", "opbouwtype": "Opbouwtype",
+                    "opbouw": "Opbouweigenschappen", "uitrusting": "Uitrusting", "lading": "Ladingsbeveiliging"}
+VOERTUIG_EIGENSCHAP_SOORTEN = [("opbouw", "voertuig_opbouw_opties"), ("uitrusting", "voertuig_uitrusting_opties"),
+                               ("lading", "voertuig_lading_opties")]
+
+
+def parse_voertuigeisen():
+    ve = {s: [] for s in VOERTUIG_SOORTEN}
+
+    def voeg(soort, naam):
+        naam = (naam or "").strip()
+        if naam and naam not in ve[soort]:
+            ve[soort].append(naam)
+    for n in request.form.getlist("voertuigtype"):
+        voeg("voertuigtype", n)
+    for n in request.form.getlist("opbouwtype"):
+        voeg("opbouwtype", n)
+    for x in request.form.getlist("eigenschap"):  # waarde is 'soort|naam'
+        soort, _, naam = x.partition("|")
+        if soort in ("opbouw", "uitrusting", "lading"):
+            voeg(soort, naam)
+    return ve
+
+
+def voertuigeisen_uit_db(tid):
+    ve = {s: [] for s in VOERTUIG_SOORTEN}
+    if tid:
+        for r in get_db().execute(
+                "SELECT soort, naam FROM transport_voertuigeisen WHERE transport_id = ? ORDER BY naam", (tid,)):
+            if r["soort"] in ve:
+                ve[r["soort"]].append(r["naam"])
+    return ve
+
+
+def zet_voertuigeisen(db, tid, ve):
+    db.execute("DELETE FROM transport_voertuigeisen WHERE transport_id = ?", (tid,))
+    for soort, namen in ve.items():
+        for naam in namen:
+            db.execute("INSERT OR IGNORE INTO transport_voertuigeisen (transport_id, soort, naam) VALUES (?, ?, ?)",
+                       (tid, soort, naam))
+
+
 def parse_transport_form():
     data, errors = {}, []
     labels = {n: l for n, l, _ in TRANSPORT_FIELDS}
@@ -671,6 +721,11 @@ def parse_transport_form():
         data["status_opmerking"] = None
     if not data["customer_id"] or not data["los_locatie_id"]:
         errors.append("Opdrachtgever en losplaatscode zijn verplicht.")
+    data["_voertuig"] = parse_voertuigeisen()
+    if not data["_voertuig"]["voertuigtype"]:
+        errors.append("Kies minimaal één voertuigtype.")
+    if not data["_voertuig"]["opbouwtype"]:
+        errors.append("Kies minimaal één opbouwtype.")
     return data, errors
 
 
@@ -746,6 +801,7 @@ def insert_transport(data, user_id):
         vals)
     tid = cur.lastrowid
     save_laadregels(tid, parse_laadregels())
+    zet_voertuigeisen(db, tid, data["_voertuig"])
     db.execute(
         "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
         (tid, data["status"], user_id, now))
@@ -761,6 +817,7 @@ def update_transport(t, data, user_id):
         f"UPDATE transports SET {sets}, updated_at = ? WHERE id = ?",
         [data[f] for f in TRANSPORT_NAMES] + [now, t["id"]])
     save_laadregels(t["id"], parse_laadregels())
+    zet_voertuigeisen(db, t["id"], data["_voertuig"])
     if data["status"] != t["status"]:
         db.execute(
             "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
@@ -855,11 +912,21 @@ def render_form(t, title, action):
         if huidig and huidig not in lijst:
             lijst.append(huidig)  # oude waarde blijft zichtbaar
         bz_opties[veld] = lijst
+    # voertuigeisen: bij een fout de ingevulde keuzes, anders wat in de database staat
+    ve = t["_voertuig"] if isinstance(t, dict) and "_voertuig" in t else voertuigeisen_uit_db(tid)
+    vt_opties = [r["naam"] for r in db.execute("SELECT naam FROM voertuigtype_opties ORDER BY naam")]
+    ob_opties = [r["naam"] for r in db.execute("SELECT naam FROM opbouwtype_opties ORDER BY naam")]
+    eig_groepen = [(VOERTUIG_SOORTEN[s], [(s, r["naam"]) for r in db.execute(
+        f"SELECT naam FROM {tabel} ORDER BY naam")]) for s, tabel in VOERTUIG_EIGENSCHAP_SOORTEN]
     opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, laad_label=laad_label, los_label=los_label,
-                           F={n: (l, k) for n, l, k in TRANSPORT_FIELDS})
+                           F={n: (l, k) for n, l, k in TRANSPORT_FIELDS},
+                           vt_opties=vt_opties, ob_opties=ob_opties, eig_groepen=eig_groepen,
+                           vt_gekozen=[(n, n) for n in ve["voertuigtype"]],
+                           ob_gekozen=[(n, n) for n in ve["opbouwtype"]],
+                           eig_gekozen=[(f"{s}|{n}", n) for s, _ in VOERTUIG_EIGENSCHAP_SOORTEN for n in ve[s]])
 
 
 # ---------- routes: inloggen ----------
@@ -2348,6 +2415,67 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {{ f('laden_met') }}
   <span></span><span></span>
   {{ f('notes', True) }}
+
+  <style>
+    .mk-box { border: 1px solid #8a8886; border-radius: 4px; padding: 6px; min-height: 36px; background: #fff; }
+    .mk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+    .mk-chip { display: inline-flex; align-items: center; gap: 4px; background: #deecf9; color: #0078d4;
+               border: 1px solid #9bc7ef; border-radius: 4px; padding: 2px 4px 2px 8px; font-size: 13px; }
+    .mk-chip button { border: none; background: none; color: #0078d4; cursor: pointer; padding: 0 4px; }
+    .mk-box select { border: none; max-width: 100%; background: transparent; }
+  </style>
+  <div class="tf-sec">Voertuigeisen</div>
+  <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+    <div>
+      <span class="lbl">Voertuigtype *</span>
+      <div class="mk-box">
+        <div class="mk-chips" id="mk_voertuigtype">{% for val, lab in vt_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="voertuigtype" value="{{ val }}"></span>{% endfor %}</div>
+        <select data-naam="voertuigtype" onchange="mkKies(this)"><option value="">+ kies…</option>{% for o in vt_opties %}<option value="{{ o }}">{{ o }}</option>{% endfor %}</select>
+      </div>
+    </div>
+    <div>
+      <span class="lbl">Opbouwtypes *</span>
+      <div class="mk-box">
+        <div class="mk-chips" id="mk_opbouwtype">{% for val, lab in ob_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="opbouwtype" value="{{ val }}"></span>{% endfor %}</div>
+        <select data-naam="opbouwtype" onchange="mkKies(this)"><option value="">+ kies…</option>{% for o in ob_opties %}<option value="{{ o }}">{{ o }}</option>{% endfor %}</select>
+      </div>
+    </div>
+  </div>
+  <div style="grid-column:1/-1">
+    <span class="lbl">Eigenschappen &amp; certificaten</span>
+    <div class="mk-box">
+      <div class="mk-chips" id="mk_eigenschap">{% for val, lab in eig_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="eigenschap" value="{{ val }}"></span>{% endfor %}</div>
+      <select data-naam="eigenschap" onchange="mkKies(this)"><option value="">+ kies…</option>{% for lab, items in eig_groepen %}<optgroup label="{{ lab }}">{% for soort, naam in items %}<option value="{{ soort }}|{{ naam }}">{{ naam }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+    </div>
+  </div>
+  <script>
+  function mkKies(sel) {
+    if (!sel.value) return;
+    const naam = sel.dataset.naam;
+    const chips = document.getElementById('mk_' + naam);
+    for (const i of chips.querySelectorAll('input')) {
+      if (i.value === sel.value) { sel.value = ''; return; }
+    }
+    const opt = sel.options[sel.selectedIndex];
+    const chip = document.createElement('span');
+    chip.className = 'mk-chip';
+    chip.appendChild(document.createTextNode(opt.textContent + ' '));
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.title = 'Verwijderen';
+    x.textContent = '×';
+    x.onclick = function () { mkWis(x); };
+    const h = document.createElement('input');
+    h.type = 'hidden';
+    h.name = naam;
+    h.value = sel.value;
+    chip.appendChild(x);
+    chip.appendChild(h);
+    chips.appendChild(chip);
+    sel.value = '';
+  }
+  function mkWis(knop) { knop.parentElement.remove(); }
+  </script>
 
   <div class="tf-sec">Laden</div>
   {{ f('laad_datum') }}

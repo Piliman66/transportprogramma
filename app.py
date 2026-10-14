@@ -459,7 +459,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.83 - 14-10-2026 23:20"
+APP_VERSIE = "1.85 - 14-10-2026 23:30"
 
 
 @app.after_request
@@ -2337,7 +2337,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <span style="display:flex;gap:6px;align-items:center">
       <input type="text" name="{{ name }}" class="{{ 'span3' if span }}" value="{{ v }}" style="{{ 'display:none' if name in ('laad_datum', 'los_datum') else 'flex:1' }}"
              placeholder="{{ 'dd-mm-jjjj uu:mm' if F[name][1] == 'datetime' else 'dd-mm-jjjj' }}" inputmode="numeric">
-      <input type="date" class="kalender" title="Kies een datum in de kalender" onchange="kiesKalender(this)" style="width:auto">
+      {% if name != 'date' %}<input type="date" class="kalender" title="Kies een datum in de kalender" onchange="kiesKalender(this)" style="width:auto">{% endif %}
     </span>
     {% else %}
     <input type="{{ 'time' if F[name][1] == 'time' else 'text' }}" name="{{ name }}" class="{{ 'span3' if span }}"
@@ -2354,6 +2354,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 
   {{ f('afdeling') }}
   {{ f('referentie') }}
+  {{ f('invoice_status') }}
+  {{ f('notes', True) }}
 
   <div class="tf-sec">Opdrachtgever</div>
   <span class="lbl">Opdrachtgever</span>
@@ -2422,12 +2424,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <span id="status_opm_dash" style="display:none;padding:8px">–</span>
   </div>
 
-  {{ f('invoice_status') }}
   {{ f('price') }}
 
   {{ f('laden_met') }}
-  <span></span><span></span>
-  {{ f('notes', True) }}
 
   <style>
     .mk-box { border: 1px solid #8a8886; border-radius: 4px; padding: 6px; min-height: 36px; background: #fff; }

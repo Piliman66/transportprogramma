@@ -459,7 +459,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.79 - 14-10-2026 22:50"
+APP_VERSIE = "1.81 - 14-10-2026 23:05"
 
 
 @app.after_request
@@ -2335,7 +2335,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     {% endif %}
     {% if F[name][1] in ('date', 'datetime') %}
     <span style="display:flex;gap:6px;align-items:center">
-      <input type="text" name="{{ name }}" class="{{ 'span3' if span }}" value="{{ v }}" style="flex:1"
+      <input type="text" name="{{ name }}" class="{{ 'span3' if span }}" value="{{ v }}" style="{{ 'display:none' if name in ('laad_datum', 'los_datum') else 'flex:1' }}"
              placeholder="{{ 'dd-mm-jjjj uu:mm' if F[name][1] == 'datetime' else 'dd-mm-jjjj' }}" inputmode="numeric">
       <input type="date" class="kalender" title="Kies een datum in de kalender" onchange="kiesKalender(this)" style="width:auto">
     </span>
@@ -2355,6 +2355,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {{ f('afdeling') }}
   {{ f('referentie') }}
 
+  <div class="tf-sec">Debiteur en Vervoerder</div>
   <span class="lbl">Debiteur</span>
   <div style="display:flex;gap:6px">
     <input id="cust_naam" readonly value="{{ relations['cust_label'] }}" placeholder="— kies een debiteur —" style="flex:1">

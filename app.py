@@ -171,6 +171,33 @@ CREATE TABLE IF NOT EXISTS laden_met_opties (
     naam TEXT PRIMARY KEY
 );
 INSERT OR IGNORE INTO laden_met_opties (naam) VALUES ('13,6 ldm Huif - Tautliner trailer');
+CREATE TABLE IF NOT EXISTS voertuigtype_opties (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO voertuigtype_opties (naam) VALUES ('Trekker met Oplegger'), ('Vrachtwagen combinatie');
+CREATE TABLE IF NOT EXISTS opbouwtype_opties (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO opbouwtype_opties (naam) VALUES ('Huif'), ('Tautliner'), ('Kast'), ('Koeler');
+CREATE TABLE IF NOT EXISTS voertuig_opbouw_opties (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO voertuig_opbouw_opties (naam) VALUES
+    ('Achteroverkipper'), ('Code XL'), ('Double stack'), ('Dubbele verdamper'), ('Hefdak'),
+    ('Joloda-rails'), ('Kasten'), ('Kledingbox'), ('Meerzijdige kipper'), ('Met luchtveren'),
+    ('Schuifdak'), ('Schuifzeil'), ('Semi dieplader'), ('Te verbreden'), ('oprit capaciteit');
+CREATE TABLE IF NOT EXISTS voertuig_uitrusting_opties (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO voertuig_uitrusting_opties (naam) VALUES
+    ('2e Chauffeur'), ('A-bordje'), ('ADR'), ('Douanesnoer'), ('GPS-tracking'), ('Houten katrollen'),
+    ('Laadklep'), ('Laadkraan'), ('Losse huif'), ('Scheidingswand'), ('Vleeshaak'), ('hellingen');
+CREATE TABLE IF NOT EXISTS voertuig_lading_opties (
+    naam TEXT PRIMARY KEY
+);
+INSERT OR IGNORE INTO voertuig_lading_opties (naam) VALUES
+    ('Antislip-Matten'), ('Boordwanden'), ('Kantbeschermers'), ('Katrollen'), ('Klembalken'),
+    ('Palletvasthoudstang'), ('Plaat met gaten'), ('Spanbanden'), ('Spankettingen');
 CREATE TABLE IF NOT EXISTS laadregels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
@@ -379,6 +406,12 @@ def init_db():
             if nieuw != pc:
                 db.execute("UPDATE locaties SET postcode = ? WHERE id = ?", (nieuw, lid))
         db.execute("PRAGMA user_version = 6")
+    # versie 7: 'Taut' in de lijst Opbouwtype heet Tautliner
+    if db.execute("PRAGMA user_version").fetchone()[0] < 7:
+        db.execute("DELETE FROM opbouwtype_opties WHERE naam = 'Taut' AND "
+                   "EXISTS (SELECT 1 FROM opbouwtype_opties WHERE naam = 'Tautliner')")
+        db.execute("UPDATE opbouwtype_opties SET naam = 'Tautliner' WHERE naam = 'Taut'")
+        db.execute("PRAGMA user_version = 7")
     have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
     for name, _, kind in RELATION_FIELDS:
         if name not in have_rel:
@@ -420,7 +453,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.74 - 14-10-2026 18:30"
+APP_VERSIE = "1.78 - 14-10-2026 22:30"
 
 
 @app.after_request
@@ -1672,13 +1705,26 @@ def export_relaties():
 # ---------- routes: gebruikers (alleen beheerder) ----------
 
 BEHEER_LIJSTEN = {
-    "afdelingen": {"tabel": "afdelingen", "kolommen": ["afdeling"], "titel": "Afdeling (landen)",
+    "afdelingen": {"tabel": "afdelingen", "kolommen": ["afdeling"], "titel": "Afdeling",
                    "uitleg": "Deze lijst zie je als keuzemenu bij Afdeling op het transportformulier."},
     "laden_met": {"tabel": "laden_met_opties", "kolommen": ["laden_met"], "titel": "Laden met",
                   "uitleg": "Deze lijst zie je als keuzemenu bij Laden met op het transportformulier."},
     "bijzonderheden": {"tabel": "bijzonderheden_opties", "kolommen": BIJZ_KOLOMMEN,
                        "titel": "Bijzonderheden laden en lossen",
                        "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden laden én Bijzonderheden lossen op het transportformulier."},
+    "voertuigtype": {"tabel": "voertuigtype_opties", "kolommen": [], "titel": "Voertuigtype",
+                     "uitleg": "Deze lijst is het keuzemenu Voertuigtype."},
+    "opbouwtype": {"tabel": "opbouwtype_opties", "kolommen": [], "titel": "Opbouwtype",
+                   "uitleg": "Deze lijst is het keuzemenu Opbouwtype."},
+    "voertuig_opbouw": {"tabel": "voertuig_opbouw_opties", "kolommen": [],
+                        "titel": "Voertuig eigenschappen – Opbouweigenschappen",
+                        "uitleg": "Onderdeel Opbouweigenschappen van het keuzemenu Voertuig eigenschappen."},
+    "voertuig_uitrusting": {"tabel": "voertuig_uitrusting_opties", "kolommen": [],
+                            "titel": "Voertuig eigenschappen – Uitrusting",
+                            "uitleg": "Onderdeel Uitrusting van het keuzemenu Voertuig eigenschappen."},
+    "voertuig_lading": {"tabel": "voertuig_lading_opties", "kolommen": [],
+                        "titel": "Voertuig eigenschappen – Ladingsbeveiliging",
+                        "uitleg": "Onderdeel Ladingsbeveiliging van het keuzemenu Voertuig eigenschappen."},
     "landcodes": {"tabel": "landcodes", "kolommen": [], "titel": "Landcodes",
                   "uitleg": "Lijst met landcodes in de vorm code – land (landnummer). Hier kun je namen wijzigen, toevoegen of verwijderen."},
 }

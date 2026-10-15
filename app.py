@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.111 - 15-10-2026 23:35"
+APP_VERSIE = "1.112 - 15-10-2026 23:45"
 
 
 @app.after_request
@@ -2077,7 +2077,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
-  <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
+  <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
   <td>{% if t['customer_name'] %}<span class="info-hover" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['referentie'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>

@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.93 - 15-10-2026 17:05"
+APP_VERSIE = "1.94 - 15-10-2026 18:50"
 
 
 @app.after_request
@@ -1999,10 +1999,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 .tf-grid input[readonly]{background:#f3f2f1;color:#605e5c}
 .tf-sec{grid-column:1/-1;font-weight:600;background:#f3f2f1;padding:6px 8px;border-radius:2px;margin-top:8px}
 .chk{display:flex;align-items:center;gap:6px;font-size:14px}
-.lad-head,.lad-row{display:grid;grid-template-columns:2fr 90px 110px 2fr 110px 80px;gap:6px;align-items:center}
+.lad-head,.lad-row{display:grid;grid-template-columns:2fr 90px 110px 2fr 110px 80px 64px;gap:6px;align-items:center}
 .lad-head .lbl{font-size:13px}
 .lad-row input{width:100%}
-.lad-det{border-bottom:1px solid #edebe9;padding-bottom:4px}
+.lad-det{border-bottom:1px solid #edebe9;padding-bottom:4px;margin-top:4px}
+.lad-knoppen{display:flex;gap:4px;justify-content:flex-end}
+.lad-knoppen button{padding:0 8px;line-height:20px;min-width:26px}
 @media (max-width:900px){aside{display:none}.inhoud{margin-left:0}.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
 @media (max-width:700px){main{padding:16px}.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-head{display:none}.lad-row{grid-template-columns:1fr 1fr}}
 </style>
@@ -2565,17 +2567,17 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% set laatste = (regels|list|max) if regels else 0 %}
   {% set openn = laatste if laatste > 1 else 1 %}
   {% for i in range(1, 6) %}{% set rr = regels.get(i, {}) %}
-  <details class="lad-det" data-i="{{ i }}" style="grid-column:1/-1" {% if i <= openn %}open{% endif %}>
-    <summary style="cursor:pointer;padding:6px 0">Laadnummer {{ i }}{% if not rr %} <em style="color:#888">(leeg)</em>{% endif %}</summary>
+  <div class="lad-det" data-i="{{ i }}" style="grid-column:1/-1" {% if i > openn %}hidden{% endif %}>
     <div class="lad-row">
-      <input name="r{{ i }}_ref" value="{{ rr['ref'] or '' }}">
+      <input name="r{{ i }}_ref" value="{{ rr['ref'] or '' }}" placeholder="Laadnummer {{ i }}">
       <input name="r{{ i }}_aantal" value="{{ rr['aantal'] or '' }}">
       <input name="r{{ i }}_eenheid" value="{{ rr['eenheid'] or '' }}">
       <input name="r{{ i }}_omschrijving" value="{{ rr['omschrijving'] or '' }}">
       <input name="r{{ i }}_gewicht" value="{{ rr['gewicht'] or '' }}">
       <input name="r{{ i }}_ldm" value="{{ rr['ldm'] or '' }}">
+      <span class="lad-knoppen"><button type="button" class="lad-plus" hidden title="Laadnummer toevoegen">+</button><button type="button" class="lad-min" hidden title="Laadnummer verwijderen">&minus;</button></span>
     </div>
-  </details>
+  </div>
   {% endfor %}
 
   <div class="tf-sec">Lossen</div>
@@ -3035,18 +3037,33 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       vorige = sel.value;
     });
   })();
-  // laadregels: tot en met de laatste ingevulde regel open, de rest ingeklapt
-  function syncLad() {
-    let laatste = 0;
-    document.querySelectorAll('.lad-det').forEach(d => {
-      const filled = [...d.querySelectorAll('input')].some(el => el.value.trim() !== '');
-      if (filled) laatste = Math.max(laatste, +d.dataset.i);
+  // laadregels: alleen zichtbare regels; + voegt een regel toe (max 5), − op de laatste regel (2 of meer) verwijdert die
+  const ladRijen = [...document.querySelectorAll('.lad-det')];
+  let ladAantal = Math.max(1, ladRijen.filter(d => !d.hidden).length);
+  function toonLaadRijen() {
+    ladRijen.forEach(d => {
+      const i = +d.dataset.i;
+      d.hidden = i > ladAantal;
+      d.querySelector('.lad-plus').hidden = !(i === ladAantal && ladAantal < ladRijen.length);
+      d.querySelector('.lad-min').hidden = !(i === ladAantal && ladAantal > 1);
     });
-    const openn = Math.max(1, laatste);
-    document.querySelectorAll('.lad-det').forEach(d => { d.open = (+d.dataset.i) <= openn; });
   }
-  document.querySelectorAll('.lad-row input').forEach(el => el.addEventListener('input', syncLad));
-  syncLad();
+  ladRijen.forEach(d => {
+    d.querySelector('.lad-plus').addEventListener('click', () => {
+      if (ladAantal >= ladRijen.length) return;
+      ladAantal++;
+      toonLaadRijen();
+      ladRijen[ladAantal - 1].querySelector('input').focus();
+    });
+    d.querySelector('.lad-min').addEventListener('click', () => {
+      const inputs = [...d.querySelectorAll('input')];
+      if (inputs.some(el => el.value.trim() !== '') && !confirm('Laadnummer ' + d.dataset.i + ' leegmaken en verwijderen?')) return;
+      inputs.forEach(el => el.value = '');
+      ladAantal--;
+      toonLaadRijen();
+    });
+  });
+  toonLaadRijen();
   // kalenderknop: kiest de datum in het dd-mm-jjjj-veld ernaast; een eventueel ingevulde tijd blijft staan
   function kiesKalender(el) {
     if (!el.value) return;

@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.94 - 15-10-2026 18:50"
+APP_VERSIE = "1.99 - 15-10-2026 19:30"
 
 
 @app.after_request
@@ -2525,9 +2525,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </script>
 
   <div class="tf-sec">Laden</div>
-  {{ f('laad_datum') }}
-  <span class="lbl">Laadtijd</span>
+  <span class="lbl">Laaddatum / laadtijd</span>
   <div style="display:flex;gap:8px;align-items:center">
+    {{ ctl('laad_datum') }}
+    <span id="laad_datum_lang" style="min-width:210px;white-space:nowrap"></span>
     <select name="laad_tijd_van" aria-label="Laadtijd van">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
@@ -2565,7 +2566,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <span class="lbl">Referentie</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
   </div>
   {% set laatste = (regels|list|max) if regels else 0 %}
-  {% set openn = laatste if laatste > 1 else 1 %}
+  {% set openn = laatste if laatste > 3 else 3 %}
   {% for i in range(1, 6) %}{% set rr = regels.get(i, {}) %}
   <div class="lad-det" data-i="{{ i }}" style="grid-column:1/-1" {% if i > openn %}hidden{% endif %}>
     <div class="lad-row">
@@ -2581,9 +2582,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% endfor %}
 
   <div class="tf-sec">Lossen</div>
-  {{ f('los_datum') }}
-  <span class="lbl">Lostijd</span>
+  <span class="lbl">Losdatum / lostijd</span>
   <div style="display:flex;gap:8px;align-items:center">
+    {{ ctl('los_datum') }}
+    <span id="lo_datum_lang" style="min-width:210px;white-space:nowrap"></span>
     <select name="los_tijd_van" aria-label="Lostijd van">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
@@ -3039,7 +3041,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   })();
   // laadregels: alleen zichtbare regels; + voegt een regel toe (max 5), − op de laatste regel (2 of meer) verwijdert die
   const ladRijen = [...document.querySelectorAll('.lad-det')];
-  let ladAantal = Math.max(1, ladRijen.filter(d => !d.hidden).length);
+  let ladAantal = Math.max(3, ladRijen.filter(d => !d.hidden).length);
   function toonLaadRijen() {
     ladRijen.forEach(d => {
       const i = +d.dataset.i;
@@ -3071,7 +3073,23 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     const [j, m, d] = el.value.split('-');
     const tijd = txt.value.match(/ ([0-9]{1,2}:[0-9]{2})$/);
     txt.value = d + '-' + m + '-' + j + (tijd ? ' ' + tijd[1] : '');
+    if (txt.name === 'los_datum' || txt.name === 'laad_datum') toonDatumLang(txt.name);
   }
+  // datum voluit weergeven, bv. woensdag 14 okt 2026 (het opgeslagen dd-mm-jjjj blijft ongewijzigd)
+  const DATUM_LANG = { laad_datum: 'laad_datum_lang', los_datum: 'lo_datum_lang' };
+  function toonDatumLang(veld) {
+    const inp = document.querySelector('input[name=' + veld + ']');
+    const el = document.getElementById(DATUM_LANG[veld]);
+    if (!inp || !el) return;
+    const delen = (inp.value || '').trim().split(' ')[0].split('-');
+    const geldig = delen.length === 3 && delen[2].length === 4;
+    const dagen = ['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag'];
+    const maanden = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+    const d = geldig ? new Date(+delen[2], +delen[1] - 1, +delen[0]) : null;
+    el.textContent = (d && d.getDate() === +delen[0]) ? dagen[d.getDay()] + ' ' + d.getDate() + ' ' + maanden[d.getMonth()] + ' ' + d.getFullYear() : '';
+  }
+  toonDatumLang('laad_datum');
+  toonDatumLang('los_datum');
   // kalender tonen op de datum die al in het veld staat
   document.querySelectorAll('input.kalender').forEach(k => {
     const txt = k.parentElement.querySelector('input[type=text]');

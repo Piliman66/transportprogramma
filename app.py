@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.107 - 15-10-2026 22:55"
+APP_VERSIE = "1.108 - 15-10-2026 23:10"
 
 
 @app.after_request
@@ -2315,6 +2315,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .tf-compact .tf-grid { gap: 6px 10px; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); }
   .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
   .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
+  .tf-compact select[name="status"], .tf-compact #status_tijd { width: 50%; }
   .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
   .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
   .tf-compact .lad-adres-grid input { width: 100%; }
@@ -2407,7 +2408,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 
   <span class="lbl">Hyperlink opdrachtgever</span>
   <div style="display:flex;gap:8px;align-items:center">
-    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}" placeholder="https://" style="flex:1">
+    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}" placeholder="https://" style="flex:0 0 75%">
     <span id="status_opm_dash" style="display:none;padding:8px">–</span>
     <a id="status_opm_link" href="#" target="_blank" rel="noopener" style="display:none;white-space:nowrap">Open link</a>
   </div>

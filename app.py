@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.100 - 15-10-2026 19:35"
+APP_VERSIE = "1.103 - 15-10-2026 19:50"
 
 
 @app.after_request
@@ -2312,7 +2312,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <form method="post" action="{{ action }}" class="card tf-compact">
 <style>
   .tf-compact { font-size: 13px; padding: 10px; }
-  .tf-compact .tf-grid { gap: 6px 10px; grid-template-columns: 150px 1fr 150px 1fr; }
+  .tf-compact .tf-grid { gap: 6px 10px; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); }
+  .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
+  .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
   .tf-compact .tf-grid .lbl { font-size: 13px; }
   .tf-compact input, .tf-compact select, .tf-compact textarea { padding: 3px 6px; font-size: 13px; }
   .tf-compact button { padding: 3px 10px; font-size: 13px; }
@@ -2526,9 +2528,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 
   <div class="tf-sec">Laden</div>
   <span class="lbl">Laaddatum / laadtijd</span>
-  <div style="display:flex;gap:8px;align-items:center">
+  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
     {{ ctl('laad_datum') }}
-    <span id="laad_datum_lang" style="min-width:210px;white-space:nowrap"></span>
+    <span id="laad_datum_lang" style="min-width:150px;white-space:nowrap"></span>
     <select name="laad_tijd_van" aria-label="Laadtijd van" style="min-width:120px">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
@@ -2583,9 +2585,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 
   <div class="tf-sec">Lossen</div>
   <span class="lbl">Losdatum / lostijd</span>
-  <div style="display:flex;gap:8px;align-items:center">
+  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
     {{ ctl('los_datum') }}
-    <span id="lo_datum_lang" style="min-width:210px;white-space:nowrap"></span>
+    <span id="lo_datum_lang" style="min-width:150px;white-space:nowrap"></span>
     <select name="los_tijd_van" aria-label="Lostijd van" style="min-width:120px">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}

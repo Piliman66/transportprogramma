@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.103 - 15-10-2026 19:50"
+APP_VERSIE = "1.106 - 15-10-2026 22:40"
 
 
 @app.after_request
@@ -2315,6 +2315,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .tf-compact .tf-grid { gap: 6px 10px; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); }
   .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
   .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
+  .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
+  .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
+  .tf-compact .lad-adres-grid input { width: 100%; }
   .tf-compact .tf-grid .lbl { font-size: 13px; }
   .tf-compact input, .tf-compact select, .tf-compact textarea { padding: 3px 6px; font-size: 13px; }
   .tf-compact button { padding: 3px 10px; font-size: 13px; }
@@ -2402,11 +2405,26 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <span id="status_tijd_dash" style="display:none;padding:8px">–</span>
   </div>
 
-  <span class="lbl">Tekst in het veld</span>
-  <div>
-    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}">
+  <span class="lbl">Hyperlink opdrachtgever</span>
+  <div style="display:flex;gap:8px;align-items:center">
+    <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}" placeholder="https://" style="flex:1">
     <span id="status_opm_dash" style="display:none;padding:8px">–</span>
+    <a id="status_opm_link" href="#" target="_blank" rel="noopener" style="display:none;white-space:nowrap">Open link</a>
   </div>
+  <script>
+  (function () {
+    const inp = document.getElementById('status_opm');
+    const a = document.getElementById('status_opm_link');
+    function werkLink() {
+      const v = inp.value.trim();
+      const ok = v.toLowerCase().indexOf('http://') === 0 || v.toLowerCase().indexOf('https://') === 0;
+      a.style.display = ok ? '' : 'none';
+      a.href = ok ? v : '#';
+    }
+    inp.addEventListener('input', werkLink);
+    werkLink();
+  })();
+  </script>
 
   <div class="tf-sec">Opdrachtgever</div>
   <span class="lbl">Opdrachtgever</span>
@@ -2530,7 +2548,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <span class="lbl">Laaddatum / laadtijd</span>
   <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
     {{ ctl('laad_datum') }}
-    <span id="laad_datum_lang" style="min-width:150px;white-space:nowrap"></span>
+    <span id="laad_datum_lang" style="white-space:nowrap"></span>
     <select name="laad_tijd_van" aria-label="Laadtijd van" style="min-width:120px">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
@@ -2540,9 +2558,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       <option value="">tot…</option>
       {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
     </select>
+    <span class="lbl">Openingstijden</span>
+    <input id="l_openingstijden" readonly style="flex:1;min-width:120px">
   </div>
-  <span class="lbl">Openingstijden</span>
-  <input id="l_openingstijden" readonly>
   <span class="lbl">Laadplaats</span>
   <div style="display:flex;gap:6px">
     <input id="laad_loc_veld" readonly value="{{ laad_label }}" placeholder="— kies een laadplaats —" style="flex:1">
@@ -2552,14 +2570,15 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <span class="lbl">Laadplaats naam</span>
   <input id="l_naam" readonly>
-  <span class="lbl">Adres</span>
-  <input id="l_adres" readonly>
-  <span class="lbl">Postcode</span>
-  <input id="l_postcode" readonly>
-  <span class="lbl">Plaats</span>
-  <input id="l_plaats" readonly>
-  <span class="lbl">Land</span>
-  <input id="l_land" readonly>
+  <details class="lad-adres" style="grid-column:1/-1">
+    <summary>Details (adres, postcode, plaats en land laadplaats)</summary>
+    <div class="lad-adres-grid">
+      <span class="lbl">Adres</span><input id="l_adres" readonly>
+      <span class="lbl">Postcode</span><input id="l_postcode" readonly>
+      <span class="lbl">Plaats</span><input id="l_plaats" readonly>
+      <span class="lbl">Land</span><input id="l_land" readonly>
+    </div>
+  </details>
 
   <span class="lbl">Bijzonderheden laden</span>{{ ctl('bijz_laden_1') }}
   <span class="lbl"></span>{{ ctl('bijz_laden_2', True) }}
@@ -2587,7 +2606,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <span class="lbl">Losdatum / lostijd</span>
   <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
     {{ ctl('los_datum') }}
-    <span id="lo_datum_lang" style="min-width:150px;white-space:nowrap"></span>
+    <span id="lo_datum_lang" style="white-space:nowrap"></span>
     <select name="los_tijd_van" aria-label="Lostijd van" style="min-width:120px">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
@@ -2597,9 +2616,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       <option value="">tot…</option>
       {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
     </select>
+    <span class="lbl">Openingstijden</span>
+    <input id="lo_openingstijden" readonly style="flex:1;min-width:120px">
   </div>
-  <span class="lbl">Openingstijden</span>
-  <input id="lo_openingstijden" readonly>
   <span class="lbl">Losplaats</span>
   <div style="display:flex;gap:6px">
     <input id="los_loc_veld" readonly value="{{ los_label }}" placeholder="— kies een losplaats —" style="flex:1">
@@ -2609,14 +2628,15 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <span class="lbl">Ontvanger</span>
   <input id="lo_naam" readonly>
-  <span class="lbl">Adres</span>
-  <input id="lo_adres" readonly>
-  <span class="lbl">Postcode</span>
-  <input id="lo_postcode" readonly>
-  <span class="lbl">Plaats</span>
-  <input id="lo_plaats" readonly>
-  <span class="lbl">Land</span>
-  <input id="lo_land" readonly>
+  <details class="lad-adres" style="grid-column:1/-1">
+    <summary>Details (adres, postcode, plaats en land losplaats)</summary>
+    <div class="lad-adres-grid">
+      <span class="lbl">Adres</span><input id="lo_adres" readonly>
+      <span class="lbl">Postcode</span><input id="lo_postcode" readonly>
+      <span class="lbl">Plaats</span><input id="lo_plaats" readonly>
+      <span class="lbl">Land</span><input id="lo_land" readonly>
+    </div>
+  </details>
 
   <span class="lbl">Bijzonderheden lossen</span>{{ ctl('bijz_lossen_1') }}
   <span class="lbl"></span>{{ ctl('bijz_lossen_2', True) }}

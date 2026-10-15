@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.99 - 15-10-2026 19:30"
+APP_VERSIE = "1.100 - 15-10-2026 19:35"
 
 
 @app.after_request
@@ -2529,12 +2529,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <div style="display:flex;gap:8px;align-items:center">
     {{ ctl('laad_datum') }}
     <span id="laad_datum_lang" style="min-width:210px;white-space:nowrap"></span>
-    <select name="laad_tijd_van" aria-label="Laadtijd van">
+    <select name="laad_tijd_van" aria-label="Laadtijd van" style="min-width:120px">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
     </select>
     <span>tot</span>
-    <select name="laad_tijd_tot" aria-label="Laadtijd tot">
+    <select name="laad_tijd_tot" aria-label="Laadtijd tot" style="min-width:120px">
       <option value="">tot…</option>
       {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
     </select>
@@ -2586,12 +2586,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <div style="display:flex;gap:8px;align-items:center">
     {{ ctl('los_datum') }}
     <span id="lo_datum_lang" style="min-width:210px;white-space:nowrap"></span>
-    <select name="los_tijd_van" aria-label="Lostijd van">
+    <select name="los_tijd_van" aria-label="Lostijd van" style="min-width:120px">
       <option value="">van…</option>
       {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
     </select>
     <span>tot</span>
-    <select name="los_tijd_tot" aria-label="Lostijd tot">
+    <select name="los_tijd_tot" aria-label="Lostijd tot" style="min-width:120px">
       <option value="">tot…</option>
       {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
     </select>

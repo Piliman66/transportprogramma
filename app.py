@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.109 - 15-10-2026 23:20"
+APP_VERSIE = "1.110 - 15-10-2026 23:30"
 
 
 @app.after_request
@@ -729,8 +729,6 @@ def parse_transport_form():
     # tijdstip en tekst alleen bewaren bij de status waar ze bij horen
     if data["status"] not in ("onderweg laden", "onderweg lossen"):
         data["status_tijd"] = None
-    if data["status"] != "nog indelen":
-        data["status_opmerking"] = None
     if not data["customer_id"] or not data["los_locatie_id"]:
         errors.append("Opdrachtgever en losplaatscode zijn verplicht.")
     data["_voertuig"] = parse_voertuigeisen()
@@ -2409,7 +2407,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <span class="lbl">Hyperlink opdrachtgever</span>
   <div style="display:flex;gap:8px;align-items:center">
     <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}" placeholder="https://" style="flex:1">
-    <span id="status_opm_dash" style="display:none;padding:8px">–</span>
     <a id="status_opm_link" href="#" target="_blank" rel="noopener" style="display:none;white-space:nowrap">Open link</a>
   </div>
   <script>
@@ -2963,17 +2960,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     inp.style.display = on ? '' : 'none';
     inp.disabled = !on;  // uitgeschakelde velden worden niet opgeslagen
     document.getElementById('status_tijd_dash').style.display = on ? 'none' : '';
-    // tekst in het veld alleen bij status "nog indelen"; anders een "–"
-    const veld = byName('status').value === 'nog indelen';
-    const opm = document.getElementById('status_opm');
-    opm.style.display = veld ? '' : 'none';
-    opm.disabled = !veld;
-    document.getElementById('status_opm_dash').style.display = veld ? 'none' : '';
   }
-  // bij een andere status worden tijdstip en tekst leeggemaakt, zodat ze opnieuw ingevuld moeten worden
+  // bij een andere status wordt alleen het tijdstip leeggemaakt; de hyperlink blijft staan
   byName('status').addEventListener('change', () => {
     document.getElementById('status_tijd').value = '';
-    document.getElementById('status_opm').value = '';
     syncTijd();
   });
   syncTijd();

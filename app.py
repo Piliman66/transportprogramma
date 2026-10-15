@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.112 - 15-10-2026 23:45"
+APP_VERSIE = "1.113 - 15-10-2026 23:55"
 
 
 @app.after_request
@@ -2208,7 +2208,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   datumLabel.title = 'Filter op datum';
   datumLabel.style.cssText = 'cursor:pointer;text-decoration:underline dotted';
   datumKop.replaceChild(datumLabel, datumKop.firstChild);
+  // gekozen dagen blijven bewaard in deze browser tot je de filter wist
+  const DATUM_KEY = 'transport_datumfilter';
   const geselecteerd = new Set();
+  try { JSON.parse(localStorage.getItem(DATUM_KEY) || '[]').forEach(d => geselecteerd.add(d)); } catch (err) { /* geen opgeslagen filter */ }
   const maandNamen = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
   const dagNamen = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
   let getoondJaar = 0, getoondMaand = 0;
@@ -2222,6 +2225,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       tr.style.display = (geselecteerd.size === 0 || geselecteerd.has(iso)) ? '' : 'none';
     });
     datumLabel.textContent = geselecteerd.size ? 'Datum (' + geselecteerd.size + ')' : 'Datum';
+    try {
+      if (geselecteerd.size) localStorage.setItem(DATUM_KEY, JSON.stringify(Array.from(geselecteerd)));
+      else localStorage.removeItem(DATUM_KEY);
+    } catch (err) { /* niet opgeslagen */ }
   }
   function tekenKalender() {
     const box = document.getElementById('kalender');
@@ -2279,6 +2286,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     pasDatumFilter();
     tekenKalender();
   });
+  pasDatumFilter();  // een eerder gekozen datumfilter direct toepassen
   document.getElementById('kolom_reset').addEventListener('click', e => {
     e.preventDefault();
     volgorde = standaard.slice();

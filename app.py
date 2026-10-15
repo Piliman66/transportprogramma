@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.110 - 15-10-2026 23:30"
+APP_VERSIE = "1.111 - 15-10-2026 23:35"
 
 
 @app.after_request
@@ -2405,7 +2405,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
 
   <span class="lbl">Hyperlink opdrachtgever</span>
-  <div style="display:flex;gap:8px;align-items:center">
+  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
     <input type="text" name="status_opmerking" id="status_opm" value="{{ t['status_opmerking'] or '' }}" placeholder="https://" style="flex:1">
     <a id="status_opm_link" href="#" target="_blank" rel="noopener" style="display:none;white-space:nowrap">Open link</a>
   </div>

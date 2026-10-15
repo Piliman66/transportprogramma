@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.106 - 15-10-2026 22:40"
+APP_VERSIE = "1.107 - 15-10-2026 22:55"
 
 
 @app.after_request
@@ -2580,8 +2580,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     </div>
   </details>
 
-  <span class="lbl">Bijzonderheden laden</span>{{ ctl('bijz_laden_1') }}
-  <span class="lbl"></span>{{ ctl('bijz_laden_2', True) }}
+  <span class="lbl">Bijzonderheden laden</span>
+  <div style="display:flex;gap:8px;grid-column:span 3">{{ ctl('bijz_laden_1') }}{{ ctl('bijz_laden_2') }}</div>
 
   <div class="lad-head" style="grid-column:1/-1">
     <span class="lbl">Referentie</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
@@ -2638,8 +2638,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     </div>
   </details>
 
-  <span class="lbl">Bijzonderheden lossen</span>{{ ctl('bijz_lossen_1') }}
-  <span class="lbl"></span>{{ ctl('bijz_lossen_2', True) }}
+  <span class="lbl">Bijzonderheden lossen</span>
+  <div style="display:flex;gap:8px;grid-column:span 3">{{ ctl('bijz_lossen_1') }}{{ ctl('bijz_lossen_2') }}</div>
 
   <div class="tf-sec">Overig</div>
   {{ f('europalletten') }}

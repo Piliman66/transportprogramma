@@ -28,7 +28,7 @@ INVOICE_STATUSES = ["niet gefactureerd", "gefactureerd", "betaald"]
 ROLES = ["beheerder", "medewerker"]
 
 # soort -> (prefix van de relatiecode, label)
-SOORTEN = {"vervoerder": ("V", "Vervoerder"), "opdrachtgever": ("D", "Opdrachtgever")}
+SOORTEN = {"vervoerder": ("W", "Vervoerder"), "opdrachtgever": ("D", "Opdrachtgever")}
 
 # Velden van een relatie (vervoerder of opdrachtgever), volgens de foto van het oude systeem.
 # Soort kind: text, textarea, bool (ja/nee) of number.
@@ -418,6 +418,18 @@ def init_db():
                    "EXISTS (SELECT 1 FROM opbouwtype_opties WHERE naam = 'Tautliner')")
         db.execute("UPDATE opbouwtype_opties SET naam = 'Tautliner' WHERE naam = 'Taut'")
         db.execute("PRAGMA user_version = 7")
+    # versie 8: vervoerder V0009 wordt W1522; nieuwe vervoerders krijgen W1523 en verder (prefix W)
+    if db.execute("PRAGMA user_version").fetchone()[0] < 8:
+        db.execute("UPDATE relaties SET code = 'W1522' WHERE code = 'V0009' AND soort = 'vervoerder' "
+                   "AND NOT EXISTS (SELECT 1 FROM relaties WHERE code = 'W1522')")
+        db.execute("INSERT INTO counters (soort, n) VALUES ('vervoerder', 1522) "
+                   "ON CONFLICT(soort) DO UPDATE SET n = 1522")
+        db.execute("PRAGMA user_version = 8")
+    # versie 9: de eerste nieuwe opdrachtgever krijgt D1873
+    if db.execute("PRAGMA user_version").fetchone()[0] < 9:
+        db.execute("INSERT INTO counters (soort, n) VALUES ('opdrachtgever', 1872) "
+                   "ON CONFLICT(soort) DO UPDATE SET n = 1872")
+        db.execute("PRAGMA user_version = 9")
     have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
     for name, _, kind in RELATION_FIELDS:
         if name not in have_rel:
@@ -459,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.89 - 14-10-2026 23:50"
+APP_VERSIE = "1.93 - 15-10-2026 17:05"
 
 
 @app.after_request
@@ -964,6 +976,8 @@ def transports():
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     sql = ("SELECT t.*, cu.name AS customer_name, c.name AS carrier_name, "
+           "cu.telefoon AS customer_tel, cu.email AS customer_email, "
+           "c.telefoon AS carrier_tel, c.email_planning AS carrier_email_planning, "
            "ll.plaats AS laad_plaats, ll.postcode AS laad_postcode, "
            "lo.plaats AS los_plaats, lo.postcode AS los_postcode FROM transports t "
            "LEFT JOIN relaties cu ON cu.id = t.customer_id "
@@ -2041,6 +2055,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <h2>Transporten</h2>
   <a class="btn" href="{{ url_for('transport_new') }}">+ Nieuw transport</a>
 </div>
+<style>
+.info-hover { position: relative; border-bottom: 1px dotted #605e5c; cursor: default; }
+.info-box { display: none; position: absolute; left: 0; top: 100%; z-index: 50; background: #fff; color: #201f1e;
+  border: 1px solid #c8c6c4; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.2); padding: 8px 10px;
+  white-space: nowrap; font-weight: normal; font-size: 13px; text-align: left; }
+.info-hover:hover .info-box, .info-hover:focus .info-box { display: block; }
+</style>
 <form method="get" class="card row">
   <input name="q" value="{{ q }}" placeholder="Zoek op nummer, datum, relatie, vervoerder, kenteken, laad- of losplaats en laad- of losplaatscode" style="max-width:520px">
   <select name="status" style="max-width:200px">
@@ -2057,13 +2078,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
   <td><span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span></td>
-  <td>{{ t['customer_name'] or '' }}</td>
+  <td>{% if t['customer_name'] %}<span class="info-hover" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['referentie'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>
   <td>{{ (t['laad_postcode'] or '')|pc_kort }}</td>
   <td>{{ t['los_plaats'] or '' }}</td>
   <td>{{ (t['los_postcode'] or '')|pc_kort }}</td>
-  <td>{{ t['carrier_name'] or '' }}</td>
+  <td>{% if t['carrier_name'] %}<span class="info-hover" tabindex="0">{{ t['carrier_name'] }}<span class="info-box"><b>Vervoerder</b><br>Telefoon: {{ t['carrier_tel'] or '–' }}<br>E-mail planning: {{ t['carrier_email_planning'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>

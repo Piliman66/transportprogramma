@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.113 - 15-10-2026 23:55"
+APP_VERSIE = "1.114 - 16-10-2026 00:00"
 
 
 @app.after_request
@@ -2061,6 +2061,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   border: 1px solid #c8c6c4; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.2); padding: 8px 10px;
   white-space: nowrap; font-weight: normal; font-size: 13px; text-align: left; }
 .info-hover:hover .info-box, .info-hover:focus .info-box { display: block; }
+.info-hover.geen-lijn { border-bottom: none; }
 </style>
 <form method="get" class="card row">
   <input name="q" value="{{ q }}" placeholder="Zoek op nummer, datum, relatie, vervoerder, kenteken, laad- of losplaats en laad- of losplaatscode" style="max-width:520px">
@@ -2077,7 +2078,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
-  <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
+  <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover geen-lijn" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
   <td>{% if t['customer_name'] %}<span class="info-hover" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['referentie'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>

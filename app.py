@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.117 - 16-10-2026 19:00"
+APP_VERSIE = "1.115 - 16-10-2026 18:40"
 
 
 @app.after_request
@@ -2323,11 +2323,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
   .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
   .tf-compact select[name="status"], .tf-compact #status_tijd { width: 50%; }
-  .eig-kolommen { columns: 3; column-gap: 18px; padding: 4px 0 8px; }
-  .eig-groep { break-inside: avoid; margin-bottom: 8px; }
-  .eig-groep > b { display: block; font-size: 12px; color: #605e5c; margin-bottom: 2px; }
-  .eig-optie { display: block; font-size: 13px; padding: 1px 0; cursor: pointer; }
-  .eig-optie input { margin: 0 6px 0 0; }
   .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
   .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
   .tf-compact .lad-adres-grid input { width: 100%; }
@@ -2522,8 +2517,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <div style="grid-column:1/-1">
     <span class="lbl">Eigenschappen &amp; certificaten</span>
-    {% set gekozen_vals = eig_gekozen|map(attribute=0)|list %}
-    <div class="eig-kolommen">{% for lab, items in eig_groepen %}<div class="eig-groep"><b>{{ lab }}</b>{% for soort, naam in items %}<label class="eig-optie"><input type="checkbox" name="eigenschap" value="{{ soort }}|{{ naam }}"{% if (soort ~ '|' ~ naam) in gekozen_vals %} checked{% endif %}> {{ naam }}</label>{% endfor %}</div>{% endfor %}</div>
+    <div class="mk-box">
+      <div class="mk-chips" id="mk_eigenschap">{% for val, lab in eig_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="eigenschap" value="{{ val }}"></span>{% endfor %}</div>
+      <select data-naam="eigenschap" onchange="mkKies(this)"><option value="">+ kies…</option>{% for lab, items in eig_groepen %}<optgroup label="{{ lab }}">{% for soort, naam in items %}<option value="{{ soort }}|{{ naam }}">{{ naam }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+    </div>
   </div>
   <script>
   function mkKies(sel) {

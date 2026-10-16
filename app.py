@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.128 - 16-10-2026 21:05"
+APP_VERSIE = "1.131 - 16-10-2026 21:20"
 
 
 @app.after_request
@@ -899,6 +899,12 @@ def locatie_adres(lid):
     return adr, (r["openingstijden"] or "")
 
 
+def ingevulde_blokken(extra, velden):
+    """Alleen de extra adressen waarin iets is ingevuld (datum, tijd, locatie, bijzonderheden of laadnummers)."""
+    return {nr: b for nr, b in extra.items()
+            if any(b.get(v) for v in velden) or b.get("regels")}
+
+
 def laadblokken_voor_formulier(extra):
     """Voegt per extra laadadres de waarden toe die het formulier toont."""
     for b in extra.values():
@@ -1283,8 +1289,8 @@ def transport_detail(tid):
     return render_template("transport_detail.html", t=t, history=history,
                            fields=[f for f in TRANSPORT_FIELDS if f[0] not in OUDE_LAADVELDEN],
                            related=related, regels=load_laadregels(tid),
-                           extra=laadblokken_voor_formulier(laadadressen_uit_db(tid)),
-                           extra_los=losblokken_voor_formulier(losadressen_uit_db(tid)),
+                           extra=ingevulde_blokken(laadblokken_voor_formulier(laadadressen_uit_db(tid)), LAADBLOK_VELDEN),
+                           extra_los=ingevulde_blokken(losblokken_voor_formulier(losadressen_uit_db(tid)), LOSBLOK_VELDEN),
                            ve=voertuigeisen_uit_db(tid),
                            eig_soorten=[(s, VOERTUIG_SOORTEN[s]) for s, _ in VOERTUIG_EIGENSCHAP_SOORTEN])
 
@@ -3416,6 +3422,23 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% else %}
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name]|nl_datum if kind in ('date', 'datetime') else (t[name] if t[name] is not none else '')) }}</td></tr>
   {% endif %}
+  {% if name == 'bijz_laden_2' %}{% for nr, b in extra.items() %}
+  <tr><th style="width:220px">Laaddatum / laadtijd (adres {{ nr }})</th><td>{{ b.d.datum or '-' }}{% if b.laad_tijd_van or b.laad_tijd_tot %} · {{ b.laad_tijd_van or '' }} tot {{ b.laad_tijd_tot or '' }}{% endif %}</td></tr>
+  <tr><th style="width:220px">Laadplaatscode (adres {{ nr }})</th><td>{{ b.d.loc_label or '-' }}{% if b.d.adres %}<br><span style="color:#605e5c">{{ b.d.adres }}</span>{% endif %}{% if b.d.openingstijden %}<br><span style="color:#605e5c">Openingstijden: {{ b.d.openingstijden }}</span>{% endif %}</td></tr>
+  <tr><th style="width:220px">Bijzonderheden laden (adres {{ nr }})</th><td>{{ b.bijz_laden_1 or '' }} {{ b.bijz_laden_2 or '' }}</td></tr>
+  {% if b.regels %}
+  <tr><th style="width:220px">Laadnummers (adres {{ nr }})</th><td>
+    {% for i, r in b.regels.items() %}
+      {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
+    {% endfor %}
+  </td></tr>
+  {% endif %}
+  {% endfor %}{% endif %}
+  {% if name == 'bijz_lossen_2' %}{% for nr, b in extra_los.items() %}
+  <tr><th style="width:220px">Losdatum / lostijd (adres {{ nr }})</th><td>{{ b.d.datum or '-' }}{% if b.los_tijd_van or b.los_tijd_tot %} · {{ b.los_tijd_van or '' }} tot {{ b.los_tijd_tot or '' }}{% endif %}</td></tr>
+  <tr><th style="width:220px">Losplaatscode (adres {{ nr }})</th><td>{{ b.d.loc_label or '-' }}{% if b.d.adres %}<br><span style="color:#605e5c">{{ b.d.adres }}</span>{% endif %}{% if b.d.openingstijden %}<br><span style="color:#605e5c">Openingstijden: {{ b.d.openingstijden }}</span>{% endif %}</td></tr>
+  <tr><th style="width:220px">Bijzonderheden lossen (adres {{ nr }})</th><td>{{ b.bijz_lossen_1 or '' }} {{ b.bijz_lossen_2 or '' }}</td></tr>
+  {% endfor %}{% endif %}
   {% endfor %}
   <tr><th style="width:220px">Voertuigtype</th><td>{{ ve['voertuigtype']|join(', ') or '-' }}</td></tr>
   <tr><th style="width:220px">Opbouwtypes</th><td>{{ ve['opbouwtype']|join(', ') or '-' }}</td></tr>
@@ -3425,43 +3448,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     {% for i, r in regels.items() %}
       {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
     {% endfor %}
-  </td></tr>
-  {% endif %}
-  {% if extra %}
-  <tr><th style="width:220px">Meer laadadressen</th><td>
-    <details>
-      <summary style="cursor:pointer">{{ extra|length }} extra laadadres{{ 'sen' if extra|length > 1 else '' }} tonen</summary>
-      {% for nr, b in extra.items() %}
-      <div style="margin:8px 0 12px;padding-left:10px;border-left:3px solid #edebe9">
-        <b>Laadadres {{ nr }}</b><br>
-        Laaddatum / laadtijd: {{ b.d.datum or '-' }}{% if b.laad_tijd_van or b.laad_tijd_tot %} · {{ b.laad_tijd_van or '' }} tot {{ b.laad_tijd_tot or '' }}{% endif %}<br>
-        Laadplaats: {{ b.d.loc_label or '-' }}<br>
-        {% if b.d.adres %}Adres laadplaats: {{ b.d.adres }}<br>{% endif %}
-        {% if b.d.openingstijden %}Openingstijden laadplaats: {{ b.d.openingstijden }}<br>{% endif %}
-        {% if b.bijz_laden_1 or b.bijz_laden_2 %}Bijzonderheden: {{ b.bijz_laden_1 or '' }} {{ b.bijz_laden_2 or '' }}<br>{% endif %}
-        {% for i, r in b.regels.items() %}
-          Laadnummer: {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
-        {% endfor %}
-      </div>
-      {% endfor %}
-    </details>
-  </td></tr>
-  {% endif %}
-  {% if extra_los %}
-  <tr><th style="width:220px">Meer losadressen</th><td>
-    <details>
-      <summary style="cursor:pointer">{{ extra_los|length }} extra losadres{{ 'sen' if extra_los|length > 1 else '' }} tonen</summary>
-      {% for nr, b in extra_los.items() %}
-      <div style="margin:8px 0 12px;padding-left:10px;border-left:3px solid #edebe9">
-        <b>Losadres {{ nr }}</b><br>
-        Losdatum / lostijd: {{ b.d.datum or '-' }}{% if b.los_tijd_van or b.los_tijd_tot %} · {{ b.los_tijd_van or '' }} tot {{ b.los_tijd_tot or '' }}{% endif %}<br>
-        Losplaats: {{ b.d.loc_label or '-' }}<br>
-        {% if b.d.adres %}Adres losplaats: {{ b.d.adres }}<br>{% endif %}
-        {% if b.d.openingstijden %}Openingstijden losplaats: {{ b.d.openingstijden }}<br>{% endif %}
-        {% if b.bijz_lossen_1 or b.bijz_lossen_2 %}Bijzonderheden: {{ b.bijz_lossen_1 or '' }} {{ b.bijz_lossen_2 or '' }}<br>{% endif %}
-      </div>
-      {% endfor %}
-    </details>
   </td></tr>
   {% endif %}
 </table>

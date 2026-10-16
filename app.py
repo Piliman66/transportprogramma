@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.140 - 16-10-2026 23:10"
+APP_VERSIE = "1.141 - 16-10-2026 23:25"
 
 
 @app.after_request
@@ -2164,15 +2164,15 @@ TEMPLATES = {
 body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;background:#faf9f8;color:#323130}
 a{color:#0078d4}
 .topbar{position:fixed;top:0;left:0;right:0;height:48px;background:#1b1b1b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:10;box-sizing:border-box}
-.topbar .merk{font-weight:600;font-size:15px}
-.topbar .gebruiker{font-size:13px;color:#d2d0ce}
+.topbar .merk{font-weight:600;font-size:15px;white-space:nowrap}
+.topbar .menu{display:flex;align-items:stretch;gap:4px;flex:1;min-width:0;margin-left:24px;overflow-x:auto;height:48px}
+.topbar .menu a{display:flex;align-items:center;padding:0 12px;color:#fff;text-decoration:none;white-space:nowrap;border-bottom:3px solid transparent;box-sizing:border-box}
+.topbar .menu a:hover{background:#2d2d2d}
+.topbar .menu a.actief{border-bottom-color:#0078d4;font-weight:600}
+.topbar .gebruiker{font-size:13px;color:#d2d0ce;white-space:nowrap;margin-left:16px}
+.topbar .gebruiker a{color:#d2d0ce}
 .shell{padding-top:48px}
-aside{position:fixed;top:48px;bottom:0;left:0;width:220px;background:#fff;border-right:1px solid #edebe9;overflow-y:auto;padding:8px 0;box-sizing:border-box}
-aside .groep{font-size:12px;font-weight:600;color:#605e5c;padding:14px 20px 4px}
-aside a{display:block;padding:7px 20px 7px 17px;color:#323130;text-decoration:none;border-left:3px solid transparent}
-aside a:hover{background:#f3f2f1}
-aside a.actief{background:#f3f2f1;border-left-color:#0078d4;font-weight:600;color:#005a9e}
-.inhoud{margin-left:220px;min-width:0}
+.inhoud{min-width:0}
 main{padding:20px 28px;max-width:1280px}
 h2{font-size:24px;font-weight:600;margin:4px 0 16px}
 h3{font-size:16px;font-weight:600;margin:8px 0}
@@ -2228,7 +2228,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 .lad-det{border-bottom:1px solid #edebe9;padding-bottom:4px;margin-top:4px}
 .lad-knoppen{display:flex;gap:4px;justify-content:flex-end}
 .lad-knoppen button{padding:0 8px;line-height:20px;min-width:26px}
-@media (max-width:900px){aside{display:none}.inhoud{margin-left:0}.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
+@media (max-width:900px){.rel-layout,.rel-cards{grid-template-columns:1fr}.rel-actions{position:static}}
 @media (max-width:700px){main{padding:16px}.tf-grid{grid-template-columns:110px 1fr}.tf-grid .span3{grid-column:1/-1}.lad-head{display:none}.lad-row{grid-template-columns:1fr 1fr}}
 </style>
 </head>
@@ -2237,22 +2237,17 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 {% set ep = request.path %}
 <div class="topbar">
   <span class="merk">Transportbeheer</span>
-  <span class="gebruiker">{{ user['name'] }}</span>
+  <nav class="menu" aria-label="Hoofdmenu">
+    <a href="{{ url_for('transports') }}" class="{{ 'actief' if ep.startswith('/transporten') }}">Transporten</a>
+    <a href="{{ url_for('relaties') }}" class="{{ 'actief' if ep.startswith('/relaties') }}">Relaties</a>
+    <a href="{{ url_for('locaties') }}" class="{{ 'actief' if ep.startswith('/locaties') }}">Locaties</a>
+    {% if user['role'] == 'beheerder' %}
+    <a href="{{ url_for('beheer') }}" class="{{ 'actief' if ep.startswith('/beheer') }}">Beheer</a>
+    <a href="{{ url_for('users') }}" class="{{ 'actief' if ep.startswith('/gebruikers') }}">Gebruikers</a>
+    {% endif %}
+  </nav>
+  <span class="gebruiker">{{ user['name'] }} · <a href="{{ url_for('logout') }}">Uitloggen</a></span>
 </div>
-<aside>
-  <div class="groep">Inzet</div>
-  <a href="{{ url_for('transports') }}" class="{{ 'actief' if ep.startswith('/transporten') }}">Transporten</a>
-  <div class="groep">Stamgegevens</div>
-  <a href="{{ url_for('relaties') }}" class="{{ 'actief' if ep.startswith('/relaties') }}">Relaties</a>
-  <a href="{{ url_for('locaties') }}" class="{{ 'actief' if ep.startswith('/locaties') }}">Locaties</a>
-  {% if user['role'] == 'beheerder' %}
-  <div class="groep">Instellingen</div>
-  <a href="{{ url_for('beheer') }}" class="{{ 'actief' if ep.startswith('/beheer') }}">Beheer</a>
-  <a href="{{ url_for('users') }}" class="{{ 'actief' if ep.startswith('/gebruikers') }}">Gebruikers</a>
-  {% endif %}
-  <div class="groep">Account</div>
-  <a href="{{ url_for('logout') }}">Uitloggen</a>
-</aside>
 <div class="inhoud shell">
 {% endif %}
 <main>

@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.136 - 16-10-2026 21:45"
+APP_VERSIE = "1.138 - 16-10-2026 22:55"
 
 
 @app.after_request
@@ -2297,7 +2297,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
 <tr><th>Nummer</th><th>Datum</th><th>Losdatum</th><th>Status</th><th>Opdrachtgever</th><th>Referentie</th><th>Laadplaats</th><th>Postcode laden</th><th>Losplaats</th><th>Postcode lossen</th><th>Vervoerder</th><th>Kenteken</th><th>Factuur</th></tr>
 {% for t in rows %}
 <tr>
-  <td><a href="{{ url_for('transport_detail', tid=t['id']) }}">{{ t['number'] }}</a></td>
+  <td><a href="{{ url_for('transport_edit', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
   <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover geen-lijn" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
@@ -3436,6 +3436,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% elif name == 'oplegger' %}
   {% elif name == 'vehicle_plate' %}
     <tr><th style="width:220px">Kenteken &amp; oplegger/trailer</th><td>{{ t['vehicle_plate'] or '-' }}{% if t['oplegger'] %} · {{ t['oplegger'] }}{% endif %}</td></tr>
+  {% elif name == 'status_opmerking' %}
+    <tr><th style="width:220px">Hyperlink opdrachtgever</th><td>{% set v = t['status_opmerking'] or '' %}{% if v[:7]|lower == 'http://' or v[:8]|lower == 'https://' %}<a href="{{ v }}" target="_blank" rel="noopener">{{ v }}</a>{% else %}{{ v or '-' }}{% endif %}</td></tr>
   {% else %}
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name]|nl_datum if kind in ('date', 'datetime') else (t[name] if t[name] is not none else '')) }}</td></tr>
   {% endif %}

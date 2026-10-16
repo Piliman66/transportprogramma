@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.138 - 16-10-2026 22:55"
+APP_VERSIE = "1.140 - 16-10-2026 23:10"
 
 
 @app.after_request
@@ -1119,7 +1119,10 @@ def render_form(t, title, action):
     # voertuigeisen: bij een fout de ingevulde keuzes, anders wat in de database staat
     ve = t["_voertuig"] if isinstance(t, dict) and "_voertuig" in t else voertuigeisen_uit_db(tid)
     vt_opties = [r["naam"] for r in db.execute("SELECT naam FROM voertuigtype_opties ORDER BY naam")]
-    ob_opties = [r["naam"] for r in db.execute("SELECT naam FROM opbouwtype_opties ORDER BY naam")]
+    # Huif, Tautliner, Kastenwagen en Koelwagen staan vooraan (linksboven); de overige op naam
+    OPBOUW_VOORAAN = ["Huif", "Tautliner", "Kastenwagen", "Koelwagen"]
+    ob_opties = sorted((r["naam"] for r in db.execute("SELECT naam FROM opbouwtype_opties")),
+                       key=lambda n: (OPBOUW_VOORAAN.index(n) if n in OPBOUW_VOORAAN else len(OPBOUW_VOORAAN), n))
     eig_groepen = [(VOERTUIG_SOORTEN[s], [(s, r["naam"]) for r in db.execute(
         f"SELECT naam FROM {tabel} ORDER BY naam")]) for s, tabel in VOERTUIG_EIGENSCHAP_SOORTEN]
     opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)

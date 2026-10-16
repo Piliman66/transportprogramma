@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.132 - 16-10-2026 21:25"
+APP_VERSIE = "1.136 - 16-10-2026 21:45"
 
 
 @app.after_request
@@ -1265,6 +1265,15 @@ def transport_new():
     return render_form(defaults, "Nieuw transport", url_for("transport_new"))
 
 
+def detail_velden():
+    """Velden op het detailscherm: de dossierinfo staat boven de status."""
+    velden = [f for f in TRANSPORT_FIELDS if f[0] not in OUDE_LAADVELDEN]
+    notes = next(f for f in velden if f[0] == "notes")
+    velden = [f for f in velden if f[0] != "notes"]
+    velden.insert(next(i for i, f in enumerate(velden) if f[0] == "status"), notes)
+    return velden
+
+
 @app.route("/transporten/<int:tid>")
 @login_required
 def transport_detail(tid):
@@ -1287,7 +1296,7 @@ def transport_detail(tid):
             related[key] = db.execute(
                 "SELECT id, code, name FROM relaties WHERE id = ?", (t[key],)).fetchone()
     return render_template("transport_detail.html", t=t, history=history,
-                           fields=[f for f in TRANSPORT_FIELDS if f[0] not in OUDE_LAADVELDEN],
+                           fields=detail_velden(),
                            related=related, regels=load_laadregels(tid),
                            extra=ingevulde_blokken(laadblokken_voor_formulier(laadadressen_uit_db(tid)), LAADBLOK_VELDEN),
                            extra_los=ingevulde_blokken(losblokken_voor_formulier(losadressen_uit_db(tid)), LOSBLOK_VELDEN),
@@ -3424,8 +3433,18 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     {% set tv = 'laad_tijd_van' if name == 'laad_datum' else 'los_tijd_van' %}
     {% set tt = 'laad_tijd_tot' if name == 'laad_datum' else 'los_tijd_tot' %}
     <tr><th style="width:220px">{{ 'Laaddatum / laadtijd' if name == 'laad_datum' else 'Losdatum / lostijd' }}</th><td>{{ t[name]|nl_datum or '-' }}{% if t[tv] or t[tt] %} · {{ t[tv] or '' }} tot {{ t[tt] or '' }}{% endif %}</td></tr>
+  {% elif name == 'oplegger' %}
+  {% elif name == 'vehicle_plate' %}
+    <tr><th style="width:220px">Kenteken &amp; oplegger/trailer</th><td>{{ t['vehicle_plate'] or '-' }}{% if t['oplegger'] %} · {{ t['oplegger'] }}{% endif %}</td></tr>
   {% else %}
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name]|nl_datum if kind in ('date', 'datetime') else (t[name] if t[name] is not none else '')) }}</td></tr>
+  {% endif %}
+  {% if name == 'bijz_laden_2' and regels %}
+  <tr><th style="width:220px">Laadnummers</th><td>
+    {% for i, r in regels.items() %}
+      {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
+    {% endfor %}
+  </td></tr>
   {% endif %}
   {% if name == 'bijz_laden_2' %}{% for nr, b in extra.items() %}
   <tr><th style="width:220px">Laaddatum / laadtijd (adres {{ nr }})</th><td>{{ b.d.datum or '-' }}{% if b.laad_tijd_van or b.laad_tijd_tot %} · {{ b.laad_tijd_van or '' }} tot {{ b.laad_tijd_tot or '' }}{% endif %}</td></tr>
@@ -3448,13 +3467,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <tr><th style="width:220px">Voertuigtype</th><td>{{ ve['voertuigtype']|join(', ') or '-' }}</td></tr>
   <tr><th style="width:220px">Opbouwtypes</th><td>{{ ve['opbouwtype']|join(', ') or '-' }}</td></tr>
   {% for s, lab in eig_soorten %}{% if ve[s] %}<tr><th style="width:220px">{{ lab }}</th><td>{{ ve[s]|join(', ') }}</td></tr>{% endif %}{% endfor %}
-  {% if regels %}
-  <tr><th style="width:220px">Laadnummers</th><td>
-    {% for i, r in regels.items() %}
-      {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
-    {% endfor %}
-  </td></tr>
-  {% endif %}
 </table>
 </div>
 

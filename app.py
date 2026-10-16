@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.143 - 16-10-2026 23:55"
+APP_VERSIE = "1.144 - 17-10-2026 00:05"
 
 
 @app.after_request
@@ -2195,6 +2195,7 @@ button:hover,.btn:hover{background:#106ebe;border-color:#106ebe}
 .card{background:#fff;padding:16px;border:1px solid #edebe9;border-radius:2px;margin-bottom:16px}
 .badge{padding:2px 8px;border-radius:10px;background:#edebe9;font-size:12px}
 table.een-regel th,table.een-regel td{white-space:nowrap}
+table.een-regel tr:hover td{background:#deecf9}
 .row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
 .tabs{display:flex;gap:0;border-bottom:1px solid #edebe9;margin-bottom:16px}
 .tabs a{padding:10px 14px;color:#605e5c;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}

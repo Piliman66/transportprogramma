@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.119 - 16-10-2026 19:30"
+APP_VERSIE = "1.120 - 16-10-2026 19:35"
 
 
 @app.after_request
@@ -2509,11 +2509,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     {% set vt_vals = vt_gekozen|map(attribute=0)|list %}
     <div class="eig-kolommen">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
   </div>
-  <div style="grid-column:1/-1">
-    <span class="lbl">Opbouwtypes *</span>
+  <details style="grid-column:1/-1"{% if ob_gekozen %} open{% endif %}>
+    <summary class="lbl" style="cursor:pointer">Opbouwtypes * ({{ ob_gekozen|length }} gekozen)</summary>
     {% set ob_vals = ob_gekozen|map(attribute=0)|list %}
     <div class="eig-kolommen">{% for o in ob_opties %}<label class="eig-optie"><input type="checkbox" name="opbouwtype" value="{{ o }}"{% if o in ob_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
-  </div>
+  </details>
   <details style="grid-column:1/-1"{% if eig_gekozen %} open{% endif %}>
     <summary class="lbl" style="cursor:pointer">Eigenschappen &amp; certificaten ({{ eig_gekozen|length }} gekozen)</summary>
     {% set gekozen_vals = eig_gekozen|map(attribute=0)|list %}

@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.125 - 16-10-2026 20:45"
+APP_VERSIE = "1.126 - 16-10-2026 20:50"
 
 
 @app.after_request
@@ -2269,10 +2269,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover geen-lijn" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
   <td>{% if t['customer_name'] %}<span class="info-hover geen-lijn" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['referentie'] or '' }}</td>
-  <td>{% if t['extra_laad'] %}1 · {% endif %}{{ t['laad_plaats'] or '' }}{% for nr, pl, pc in t['extra_laad'] %}<br>{{ nr }} · {{ pl or '' }}{% endfor %}</td>
-  <td>{% if t['extra_laad'] %}1 · {% endif %}{{ (t['laad_postcode'] or '')|pc_kort }}{% for nr, pl, pc in t['extra_laad'] %}<br>{{ nr }} · {{ (pc or '')|pc_kort }}{% endfor %}</td>
-  <td>{% if t['extra_los'] %}1 · {% endif %}{{ t['los_plaats'] or '' }}{% for nr, pl, pc in t['extra_los'] %}<br>{{ nr }} · {{ pl or '' }}{% endfor %}</td>
-  <td>{% if t['extra_los'] %}1 · {% endif %}{{ (t['los_postcode'] or '')|pc_kort }}{% for nr, pl, pc in t['extra_los'] %}<br>{{ nr }} · {{ (pc or '')|pc_kort }}{% endfor %}</td>
+  <td>{{ t['laad_plaats'] or '' }}{% for nr, pl, pc in t['extra_laad'] %}<br>{{ pl or '' }}{% endfor %}</td>
+  <td>{{ (t['laad_postcode'] or '')|pc_kort }}{% for nr, pl, pc in t['extra_laad'] %}<br>{{ (pc or '')|pc_kort }}{% endfor %}</td>
+  <td>{{ t['los_plaats'] or '' }}{% for nr, pl, pc in t['extra_los'] %}<br>{{ pl or '' }}{% endfor %}</td>
+  <td>{{ (t['los_postcode'] or '')|pc_kort }}{% for nr, pl, pc in t['extra_los'] %}<br>{{ (pc or '')|pc_kort }}{% endfor %}</td>
   <td>{% if t['carrier_name'] %}<span class="info-hover geen-lijn" tabindex="0">{{ t['carrier_name'] }}<span class="info-box"><b>Vervoerder</b><br>Telefoon: {{ t['carrier_tel'] or '–' }}<br>E-mail planning: {{ t['carrier_email_planning'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>

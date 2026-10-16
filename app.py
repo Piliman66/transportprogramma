@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.114 - 16-10-2026 00:00"
+APP_VERSIE = "1.116 - 16-10-2026 18:50"
 
 
 @app.after_request
@@ -2079,13 +2079,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
   <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover geen-lijn" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
-  <td>{% if t['customer_name'] %}<span class="info-hover" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
+  <td>{% if t['customer_name'] %}<span class="info-hover geen-lijn" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['referentie'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}</td>
   <td>{{ (t['laad_postcode'] or '')|pc_kort }}</td>
   <td>{{ t['los_plaats'] or '' }}</td>
   <td>{{ (t['los_postcode'] or '')|pc_kort }}</td>
-  <td>{% if t['carrier_name'] %}<span class="info-hover" tabindex="0">{{ t['carrier_name'] }}<span class="info-box"><b>Vervoerder</b><br>Telefoon: {{ t['carrier_tel'] or '–' }}<br>E-mail planning: {{ t['carrier_email_planning'] or '–' }}</span></span>{% endif %}</td>
+  <td>{% if t['carrier_name'] %}<span class="info-hover geen-lijn" tabindex="0">{{ t['carrier_name'] }}<span class="info-box"><b>Vervoerder</b><br>Telefoon: {{ t['carrier_tel'] or '–' }}<br>E-mail planning: {{ t['carrier_email_planning'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['vehicle_plate'] or '' }}</td>
   <td>{{ t['invoice_status'] or '' }}</td>
 </tr>
@@ -2323,6 +2323,14 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
   .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
   .tf-compact select[name="status"], .tf-compact #status_tijd { width: 50%; }
+  .mk-box select[hidden] { display: none; }
+  .tf-compact .mk-pop > summary { padding: 3px 8px !important; border: 1px solid #c8c6c4; border-radius: 4px; background: #fff; cursor: pointer; list-style: none; }
+  .mk-pop[open] > summary { border-color: #0078d4; }
+  .mk-kolommen { columns: 3; column-gap: 18px; max-height: 320px; overflow-y: auto; margin-top: 4px; padding: 8px; border: 1px solid #c8c6c4; border-radius: 4px; background: #fff; }
+  .mk-groep { break-inside: avoid; margin-bottom: 8px; }
+  .mk-groep > b { display: block; font-size: 12px; color: #605e5c; margin-bottom: 2px; }
+  .mk-optie { display: block; width: 100%; text-align: left; background: none; border: none; padding: 3px 4px; cursor: pointer; font-size: 13px; color: #201f1e; }
+  .mk-optie:hover, .mk-optie:focus { background: #f3f2f1; }
   .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
   .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
   .tf-compact .lad-adres-grid input { width: 100%; }
@@ -2519,7 +2527,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <span class="lbl">Eigenschappen &amp; certificaten</span>
     <div class="mk-box">
       <div class="mk-chips" id="mk_eigenschap">{% for val, lab in eig_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="eigenschap" value="{{ val }}"></span>{% endfor %}</div>
-      <select data-naam="eigenschap" onchange="mkKies(this)"><option value="">+ kies…</option>{% for lab, items in eig_groepen %}<optgroup label="{{ lab }}">{% for soort, naam in items %}<option value="{{ soort }}|{{ naam }}">{{ naam }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+      <select data-naam="eigenschap" onchange="mkKies(this)" hidden><option value="">+ kies…</option>{% for lab, items in eig_groepen %}<optgroup label="{{ lab }}">{% for soort, naam in items %}<option value="{{ soort }}|{{ naam }}">{{ naam }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+      <details class="mk-pop">
+        <summary>+ kies…</summary>
+        <div class="mk-kolommen">{% for lab, items in eig_groepen %}<div class="mk-groep"><b>{{ lab }}</b>{% for soort, naam in items %}<button type="button" class="mk-optie" data-waarde="{{ soort }}|{{ naam }}">{{ naam }}</button>{% endfor %}</div>{% endfor %}</div>
+      </details>
     </div>
   </div>
   <script>
@@ -2549,6 +2561,13 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     sel.value = '';
   }
   function mkWis(knop) { knop.parentElement.remove(); }
+  // eigenschappen: kiezen uit het paneel met drie kolommen
+  document.querySelectorAll('.mk-optie').forEach(b => b.addEventListener('click', () => {
+    const sel = document.querySelector('select[data-naam="eigenschap"]');
+    sel.value = b.dataset.waarde;
+    mkKies(sel);
+    b.closest('details').open = false;
+  }));
   </script>
 
   <div class="tf-sec">Laden</div>

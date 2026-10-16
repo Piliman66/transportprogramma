@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.142 - 16-10-2026 23:45"
+APP_VERSIE = "1.143 - 16-10-2026 23:55"
 
 
 @app.after_request
@@ -3413,7 +3413,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <a class="btn" href="{{ url_for('transport_edit', tid=t['id']) }}">Bewerken</a>
     {% if user['role'] == 'beheerder' %}
     <form method="post" action="{{ url_for('transport_delete', tid=t['id']) }}" style="display:inline"
-          onsubmit="return confirm('Transport verwijderen?')">
+          onsubmit="return confirm('Weet je zeker dat je transport {{ t['number'] }} wilt verwijderen? Dit kan niet ongedaan worden gemaakt.')">
       <button class="gevaar">Verwijderen</button>
     </form>
     {% endif %}
@@ -3692,7 +3692,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     <a class="btn" href="{{ url_for('relaties', soort=c['soort']) }}">Terug naar lijst</a>
     {% if user['role'] == 'beheerder' %}
     <form method="post" action="{{ url_for('relatie_delete', rid=c['id']) }}"
-          onsubmit="return confirm('Relatie verwijderen?')">
+          onsubmit="return confirm('Weet je zeker dat je relatie {{ c['code'] }} wilt verwijderen? Gekoppelde transporten verliezen die relatie. Dit kan niet ongedaan worden gemaakt.')">
       <button class="btn gevaar" style="width:100%">Verwijderen</button>
     </form>
     {% endif %}
@@ -3791,7 +3791,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <p style="padding:12px"><button>Opslaan</button> <a href="{{ url_for('locaties') }}">Annuleren</a></p>
 </form>
 {% if lid is defined and user['role'] == 'beheerder' %}
-<form method="post" action="{{ url_for('locatie_delete', lid=lid) }}" onsubmit="return confirm('Locatie verwijderen?')" style="margin-top:12px">
+<form method="post" action="{{ url_for('locatie_delete', lid=lid) }}" onsubmit="return confirm('Weet je zeker dat je locatie {{ c['code'] }} wilt verwijderen? Gekoppelde transporten verliezen die locatie. Dit kan niet ongedaan worden gemaakt.')" style="margin-top:12px">
   <button class="gevaar">Locatie verwijderen</button>
 </form>
 {% endif %}
@@ -3874,7 +3874,7 @@ function lrWis(knop) { knop.parentElement.remove(); }
   <input name="naam" placeholder="Nieuwe naam" style="max-width:320px">
   <button formaction="{{ url_for('beheer_wijzig', sleutel=l.sleutel) }}">Wijzig</button>
   <button class="gevaar" formaction="{{ url_for('beheer_verwijder', sleutel=l.sleutel) }}"
-          onclick="return confirm('Verwijderen uit de lijst?')">Verwijderen</button>
+          onclick="return confirm('Weet je zeker dat je dit item uit de lijst wilt verwijderen? Bestaande transporten houden hun waarde. Dit kan niet ongedaan worden gemaakt.')">Verwijderen</button>
 </form>
 
 <form method="post" action="{{ url_for('beheer_nieuw', sleutel=l.sleutel) }}" class="row" style="margin-bottom:12px">
@@ -3916,7 +3916,7 @@ function lrWis(knop) { knop.parentElement.remove(); }
 <tr>
   <td>{{ u['name'] }}</td><td>{{ u['username'] }}</td><td>{{ u['role'] }}</td>
   <td>{% if u['id'] != user['id'] %}
-    <form method="post" action="{{ url_for('user_delete', uid=u['id']) }}" onsubmit="return confirm('Gebruiker verwijderen?')">
+    <form method="post" action="{{ url_for('user_delete', uid=u['id']) }}" onsubmit="return confirm('Weet je zeker dat je gebruiker {{ u['username'] }} wilt verwijderen? Dit kan niet ongedaan worden gemaakt.')">
       <button class="gevaar">Verwijderen</button>
     </form>
   {% endif %}</td>

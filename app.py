@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS transport_voertuigeisen (
 CREATE TABLE IF NOT EXISTS laadregels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
+    adres_nr INTEGER NOT NULL DEFAULT 1,
     volgorde INTEGER NOT NULL,
     ref TEXT,
     aantal TEXT,
@@ -214,6 +215,28 @@ CREATE TABLE IF NOT EXISTS laadregels (
     omschrijving TEXT,
     gewicht TEXT,
     ldm TEXT
+);
+CREATE TABLE IF NOT EXISTS laadadressen (
+    transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
+    nr INTEGER NOT NULL,
+    laad_datum TEXT,
+    laad_tijd_van TEXT,
+    laad_tijd_tot TEXT,
+    laad_locatie_id INTEGER REFERENCES locaties(id),
+    bijz_laden_1 TEXT,
+    bijz_laden_2 TEXT,
+    PRIMARY KEY (transport_id, nr)
+);
+CREATE TABLE IF NOT EXISTS losadressen (
+    transport_id INTEGER NOT NULL REFERENCES transports(id) ON DELETE CASCADE,
+    nr INTEGER NOT NULL,
+    los_datum TEXT,
+    los_tijd_van TEXT,
+    los_tijd_tot TEXT,
+    los_locatie_id INTEGER REFERENCES locaties(id),
+    bijz_lossen_1 TEXT,
+    bijz_lossen_2 TEXT,
+    PRIMARY KEY (transport_id, nr)
 );
 CREATE TABLE IF NOT EXISTS locaties (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -430,6 +453,11 @@ def init_db():
         db.execute("INSERT INTO counters (soort, n) VALUES ('opdrachtgever', 1872) "
                    "ON CONFLICT(soort) DO UPDATE SET n = 1872")
         db.execute("PRAGMA user_version = 9")
+    # versie 10: laadregels horen bij een laadadres (1, 2 of 3)
+    if db.execute("PRAGMA user_version").fetchone()[0] < 10:
+        if "adres_nr" not in {r[1] for r in db.execute("PRAGMA table_info(laadregels)")}:
+            db.execute("ALTER TABLE laadregels ADD COLUMN adres_nr INTEGER NOT NULL DEFAULT 1")
+        db.execute("PRAGMA user_version = 10")
     have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
     for name, _, kind in RELATION_FIELDS:
         if name not in have_rel:
@@ -471,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.120 - 16-10-2026 19:35"
+APP_VERSIE = "1.124 - 16-10-2026 20:30"
 
 
 @app.after_request
@@ -736,6 +764,10 @@ def parse_transport_form():
         errors.append("Kies minimaal één voertuigtype.")
     if not data["_voertuig"]["opbouwtype"]:
         errors.append("Kies minimaal één opbouwtype.")
+    data["_extra"], extra_fouten = parse_extra_laadadressen()
+    errors.extend(extra_fouten)
+    data["_extra_los"], extra_los_fouten = parse_extra_losadressen()
+    errors.extend(extra_los_fouten)
     return data, errors
 
 
@@ -774,30 +806,155 @@ OUDE_LAADVELDEN = ("laad_ref", "colli", "laad_eenheid", "goods_type", "weight_kg
                    "laad_regel_2", "laad_regel_3")
 
 
-def parse_laadregels():
-    """Leest de 5 laadregels uit het formulier; alleen regels met iets ingevuld."""
+AANTAL_LAADADRESSEN = 3
+# de velden van laadadres 2 en 3 in het formulier beginnen met b2_ of b3_; laadadres 1 heeft geen voorvoegsel
+LAADBLOK_VELDEN = ("laad_datum", "laad_tijd_van", "laad_tijd_tot", "laad_locatie_id", "bijz_laden_1", "bijz_laden_2")
+
+
+def parse_laadregels(prefix=""):
+    """Leest de 5 laadregels van een laadadres uit het formulier; alleen regels met iets ingevuld."""
     regels = {}
     for i in range(1, AANTAL_LAADREGELS + 1):
-        vals = {v: request.form.get(f"r{i}_{v}", "").strip() or None for v in LAAD_VELDEN}
+        vals = {v: request.form.get(f"{prefix}r{i}_{v}", "").strip() or None for v in LAAD_VELDEN}
         if any(vals.values()):
             regels[i] = vals
     return regels
 
 
-def save_laadregels(tid, regels):
+def save_laadregels(tid, regels, nr=1):
     db = get_db()
-    db.execute("DELETE FROM laadregels WHERE transport_id = ?", (tid,))
+    db.execute("DELETE FROM laadregels WHERE transport_id = ? AND adres_nr = ?", (tid, nr))
     for i, vals in regels.items():
         db.execute(
-            "INSERT INTO laadregels (transport_id, volgorde, ref, aantal, eenheid, omschrijving, gewicht, ldm) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [tid, i] + [vals[v] for v in LAAD_VELDEN])
+            "INSERT INTO laadregels (transport_id, adres_nr, volgorde, ref, aantal, eenheid, omschrijving, gewicht, ldm) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [tid, nr, i] + [vals[v] for v in LAAD_VELDEN])
 
 
-def load_laadregels(tid):
+def load_laadregels(tid, nr=1):
     rows = get_db().execute(
-        "SELECT * FROM laadregels WHERE transport_id = ? ORDER BY volgorde", (tid,)).fetchall()
+        "SELECT * FROM laadregels WHERE transport_id = ? AND adres_nr = ? ORDER BY volgorde", (tid, nr)).fetchall()
     return {r["volgorde"]: {v: r[v] for v in LAAD_VELDEN} for r in rows}
+
+
+def parse_extra_laadadressen():
+    """Laadadres 2 en 3 uit het formulier; alleen de adressen die zichtbaar zijn (b2_actief / b3_actief)."""
+    extra, fouten = {}, []
+    for nr in range(2, AANTAL_LAADADRESSEN + 1):
+        p = f"b{nr}_"
+        if not request.form.get(p + "actief"):
+            continue
+        raw = request.form.get(p + "laad_datum", "").strip()
+        datum = None
+        if raw:
+            datum = parse_nl_datum(raw)
+            if datum is None:
+                fouten.append(f"Ongeldige datum bij Laadadres {nr} (gebruik dd-mm-jjjj).")
+        loc = request.form.get(p + "laad_locatie_id", "").strip()
+        extra[nr] = {
+            "laad_datum": datum,
+            "laad_tijd_van": request.form.get(p + "laad_tijd_van", "").strip() or None,
+            "laad_tijd_tot": request.form.get(p + "laad_tijd_tot", "").strip() or None,
+            "laad_locatie_id": int(loc) if loc.isdigit() else None,
+            "bijz_laden_1": request.form.get(p + "bijz_laden_1", "").strip() or None,
+            "bijz_laden_2": request.form.get(p + "bijz_laden_2", "").strip() or None,
+            "regels": parse_laadregels(p),
+        }
+    return extra, fouten
+
+
+def laadadressen_uit_db(tid):
+    if not tid:
+        return {}
+    db = get_db()
+    extra = {}
+    for r in db.execute("SELECT * FROM laadadressen WHERE transport_id = ? ORDER BY nr", (tid,)).fetchall():
+        b = {k: r[k] for k in LAADBLOK_VELDEN}
+        b["regels"] = load_laadregels(tid, r["nr"])
+        extra[r["nr"]] = b
+    return extra
+
+
+def save_laadadressen(tid, extra):
+    db = get_db()
+    db.execute("DELETE FROM laadadressen WHERE transport_id = ?", (tid,))
+    db.execute("DELETE FROM laadregels WHERE transport_id = ? AND adres_nr > 1", (tid,))
+    for nr, b in extra.items():
+        db.execute(
+            "INSERT INTO laadadressen (transport_id, nr, laad_datum, laad_tijd_van, laad_tijd_tot, "
+            "laad_locatie_id, bijz_laden_1, bijz_laden_2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [tid, nr] + [b[k] for k in LAADBLOK_VELDEN])
+        save_laadregels(tid, b["regels"], nr)
+
+
+def laadblokken_voor_formulier(extra):
+    """Voegt per extra laadadres de waarden toe die het formulier toont."""
+    for b in extra.values():
+        b["d"] = {
+            "datum": nl_datum(b.get("laad_datum")),
+            "tijd_van": b.get("laad_tijd_van"),
+            "tijd_tot": b.get("laad_tijd_tot"),
+            "loc_id": b.get("laad_locatie_id") or "",
+            "loc_label": locatie_label(b.get("laad_locatie_id")),
+        }
+    return extra
+
+
+LOSBLOK_VELDEN = ("los_datum", "los_tijd_van", "los_tijd_tot", "los_locatie_id", "bijz_lossen_1", "bijz_lossen_2")
+
+
+def parse_extra_losadressen():
+    """Losadres 2 en 3 uit het formulier; alleen de adressen die zichtbaar zijn (los2_actief / los3_actief)."""
+    extra, fouten = {}, []
+    for nr in range(2, AANTAL_LAADADRESSEN + 1):
+        p = f"los{nr}_"
+        if not request.form.get(p + "actief"):
+            continue
+        raw = request.form.get(p + "los_datum", "").strip()
+        datum = None
+        if raw:
+            datum = parse_nl_datum(raw)
+            if datum is None:
+                fouten.append(f"Ongeldige datum bij Losadres {nr} (gebruik dd-mm-jjjj).")
+        loc = request.form.get(p + "los_locatie_id", "").strip()
+        extra[nr] = {
+            "los_datum": datum,
+            "los_tijd_van": request.form.get(p + "los_tijd_van", "").strip() or None,
+            "los_tijd_tot": request.form.get(p + "los_tijd_tot", "").strip() or None,
+            "los_locatie_id": int(loc) if loc.isdigit() else None,
+            "bijz_lossen_1": request.form.get(p + "bijz_lossen_1", "").strip() or None,
+            "bijz_lossen_2": request.form.get(p + "bijz_lossen_2", "").strip() or None,
+        }
+    return extra, fouten
+
+
+def losadressen_uit_db(tid):
+    if not tid:
+        return {}
+    return {r["nr"]: {k: r[k] for k in LOSBLOK_VELDEN}
+            for r in get_db().execute("SELECT * FROM losadressen WHERE transport_id = ? ORDER BY nr", (tid,)).fetchall()}
+
+
+def save_losadressen(tid, extra):
+    db = get_db()
+    db.execute("DELETE FROM losadressen WHERE transport_id = ?", (tid,))
+    for nr, b in extra.items():
+        db.execute(
+            "INSERT INTO losadressen (transport_id, nr, los_datum, los_tijd_van, los_tijd_tot, "
+            "los_locatie_id, bijz_lossen_1, bijz_lossen_2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [tid, nr] + [b[k] for k in LOSBLOK_VELDEN])
+
+
+def losblokken_voor_formulier(extra):
+    for b in extra.values():
+        b["d"] = {
+            "datum": nl_datum(b.get("los_datum")),
+            "tijd_van": b.get("los_tijd_van"),
+            "tijd_tot": b.get("los_tijd_tot"),
+            "loc_id": b.get("los_locatie_id") or "",
+            "loc_label": locatie_label(b.get("los_locatie_id")),
+        }
+    return extra
 
 
 def insert_transport(data, user_id):
@@ -811,6 +968,8 @@ def insert_transport(data, user_id):
         vals)
     tid = cur.lastrowid
     save_laadregels(tid, parse_laadregels())
+    save_laadadressen(tid, data["_extra"])
+    save_losadressen(tid, data["_extra_los"])
     zet_voertuigeisen(db, tid, data["_voertuig"])
     db.execute(
         "INSERT INTO status_history (transport_id, status, changed_by, changed_at) VALUES (?, ?, ?, ?)",
@@ -827,6 +986,8 @@ def update_transport(t, data, user_id):
         f"UPDATE transports SET {sets}, updated_at = ? WHERE id = ?",
         [data[f] for f in TRANSPORT_NAMES] + [now, t["id"]])
     save_laadregels(t["id"], parse_laadregels())
+    save_laadadressen(t["id"], data["_extra"])
+    save_losadressen(t["id"], data["_extra_los"])
     zet_voertuigeisen(db, t["id"], data["_voertuig"])
     if data["status"] != t["status"]:
         db.execute(
@@ -881,6 +1042,17 @@ def render_form(t, title, action):
         regels = parse_laadregels()
     else:
         regels = {}
+    # laadadres 2 en 3: bij een fout de ingevulde waarden, anders wat in de database staat
+    if isinstance(t, dict) and "_extra" in t:
+        extra = t["_extra"]
+    else:
+        extra = laadadressen_uit_db(tid)
+    extra = laadblokken_voor_formulier(extra)
+    if isinstance(t, dict) and "_extra_los" in t:
+        extra_los = t["_extra_los"]
+    else:
+        extra_los = losadressen_uit_db(tid)
+    extra_los = losblokken_voor_formulier(extra_los)
     afdelingen = [r["naam"] for r in db.execute("SELECT naam FROM afdelingen ORDER BY naam")]
     try:
         huidig = t["afdeling"]
@@ -930,7 +1102,7 @@ def render_form(t, title, action):
         f"SELECT naam FROM {tabel} ORDER BY naam")]) for s, tabel in VOERTUIG_EIGENSCHAP_SOORTEN]
     opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
     return render_template("transport_form.html", t=t, title=title, action=action,
-                           regels=regels, fields=TRANSPORT_FIELDS, options=opties,
+                           regels=regels, extra=extra, extra_los=extra_los, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, laad_label=laad_label, los_label=los_label,
                            F={n: (l, k) for n, l, k in TRANSPORT_FIELDS},
                            vt_opties=vt_opties, ob_opties=ob_opties, eig_groepen=eig_groepen,
@@ -1081,7 +1253,9 @@ def transport_detail(tid):
                 "SELECT id, code, name FROM relaties WHERE id = ?", (t[key],)).fetchone()
     return render_template("transport_detail.html", t=t, history=history,
                            fields=[f for f in TRANSPORT_FIELDS if f[0] not in OUDE_LAADVELDEN],
-                           related=related, regels=load_laadregels(tid))
+                           related=related, regels=load_laadregels(tid),
+                           extra=laadblokken_voor_formulier(laadadressen_uit_db(tid)),
+                           extra_los=losblokken_voor_formulier(losadressen_uit_db(tid)))
 
 
 @app.route("/transporten/<int:tid>/bewerk", methods=["GET", "POST"])
@@ -1725,6 +1899,8 @@ def locatie_importeren():
 def locatie_delete(lid):
     db = get_db()
     db.execute("UPDATE transports SET laad_locatie_id = NULL WHERE laad_locatie_id = ?", (lid,))
+    db.execute("UPDATE laadadressen SET laad_locatie_id = NULL WHERE laad_locatie_id = ?", (lid,))
+    db.execute("UPDATE losadressen SET los_locatie_id = NULL WHERE los_locatie_id = ?", (lid,))
     db.execute("UPDATE transports SET los_locatie_id = NULL WHERE los_locatie_id = ?", (lid,))
     db.execute("DELETE FROM locatie_relaties WHERE locatie_id = ?", (lid,))
     db.execute("DELETE FROM locaties WHERE id = ?", (lid,))
@@ -2329,6 +2505,9 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .eig-optie { display: block; font-size: 13px; padding: 1px 0; cursor: pointer; }
   .eig-optie input { margin: 0 6px 0 0; }
   .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
+  .laad-blok[hidden], .los-blok[hidden], .bl-plus[hidden], .bl-min[hidden] { display: none; }
+  .laad-kop { display: flex; justify-content: space-between; align-items: center; }
+  .bl-knoppen { display: flex; gap: 6px; }
   .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
   .tf-compact .lad-adres-grid input { width: 100%; }
   .tf-compact .tf-grid .lbl { font-size: 13px; }
@@ -2396,6 +2575,118 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% endif %}
 {% endmacro %}
 {% macro f(name, span=False) %}<span class="lbl">{{ F[name][0] }}</span>{{ ctl(name, span) }}{% endmacro %}
+{% macro laad_blok(p, titel, nr, zichtbaar, d, bijz, regels) %}
+<div class="tf-grid laad-blok" data-blok="{{ nr }}" style="grid-column:1/-1"{% if not zichtbaar %} hidden{% endif %}>
+  {% if nr > 1 %}<input type="hidden" class="bl-actief" name="b{{ nr }}_actief" value="{{ '1' if zichtbaar else '' }}">{% endif %}
+  <div class="tf-sec laad-kop" style="grid-column:1/-1"><span>{{ titel }}</span><span class="bl-knoppen"><button type="button" class="bl-plus" hidden title="Laadadres toevoegen">+</button><button type="button" class="bl-min" hidden title="Laadadres verwijderen">&minus;</button></span></div>
+  <span class="lbl">Laaddatum / laadtijd</span>
+  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
+    <span style="display:flex;gap:6px;align-items:center">
+      <input type="text" name="{{ p }}laad_datum" value="{{ d.datum }}" style="display:none" placeholder="dd-mm-jjjj" inputmode="numeric">
+      <input type="date" class="kalender" title="Kies een datum in de kalender" onchange="kiesKalender(this)" style="width:auto">
+    </span>
+    <span id="{{ p }}laad_datum_lang" style="white-space:nowrap"></span>
+    <select name="{{ p }}laad_tijd_van" aria-label="Laadtijd van" style="min-width:120px">
+      <option value="">van…</option>
+      {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}"{% if d.tijd_van == tj %} selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span>tot</span>
+    <select name="{{ p }}laad_tijd_tot" aria-label="Laadtijd tot" style="min-width:120px">
+      <option value="">tot…</option>
+      {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}"{% if d.tijd_tot == tj %} selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span class="lbl">Openingstijden</span>
+    <input id="{{ p }}l_openingstijden" readonly style="flex:1;min-width:120px">
+  </div>
+  <span class="lbl">Laadplaats</span>
+  <div style="display:flex;gap:6px">
+    <input id="{{ p }}laad_loc_veld" readonly value="{{ d.loc_label }}" placeholder="— kies een laadplaats —" style="flex:1">
+    <input type="hidden" name="{{ p }}laad_locatie_id" value="{{ d.loc_id }}">
+    <button type="button" onclick="openLocZoek('{{ p }}laad_locatie_id')">Zoeken…</button>
+    <button type="button" onclick="wisLoc('{{ p }}laad_locatie_id')" title="Laadplaats verwijderen">Wis</button>
+  </div>
+  <span class="lbl">Laadplaats naam</span>
+  <input id="{{ p }}l_naam" readonly>
+  <details class="lad-adres" style="grid-column:1/-1">
+    <summary>Details (adres, postcode, plaats en land laadplaats)</summary>
+    <div class="lad-adres-grid">
+      <span class="lbl">Adres</span><input id="{{ p }}l_adres" readonly>
+      <span class="lbl">Postcode</span><input id="{{ p }}l_postcode" readonly>
+      <span class="lbl">Plaats</span><input id="{{ p }}l_plaats" readonly>
+      <span class="lbl">Land</span><input id="{{ p }}l_land" readonly>
+    </div>
+  </details>
+
+  <span class="lbl">Bijzonderheden laden</span>
+  <div style="display:flex;gap:8px;grid-column:span 3">{{ bijz }}</div>
+
+  <div class="lad-head" style="grid-column:1/-1">
+    <span class="lbl">Referentie</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
+  </div>
+  {% set laatste = (regels|list|max) if regels else 0 %}
+  {% set openn = laatste if laatste > 3 else 3 %}
+  {% for i in range(1, 6) %}{% set rr = regels.get(i, {}) %}
+  <div class="lad-det" data-i="{{ i }}" style="grid-column:1/-1" {% if i > openn %}hidden{% endif %}>
+    <div class="lad-row">
+      <input name="{{ p }}r{{ i }}_ref" value="{{ rr['ref'] or '' }}" placeholder="Laadnummer {{ i }}">
+      <input name="{{ p }}r{{ i }}_aantal" value="{{ rr['aantal'] or '' }}">
+      <input name="{{ p }}r{{ i }}_eenheid" value="{{ rr['eenheid'] or '' }}">
+      <input name="{{ p }}r{{ i }}_omschrijving" value="{{ rr['omschrijving'] or '' }}">
+      <input name="{{ p }}r{{ i }}_gewicht" value="{{ rr['gewicht'] or '' }}">
+      <input name="{{ p }}r{{ i }}_ldm" value="{{ rr['ldm'] or '' }}">
+      <span class="lad-knoppen"><button type="button" class="lad-plus" hidden title="Laadnummer toevoegen">+</button><button type="button" class="lad-min" hidden title="Laadnummer verwijderen">&minus;</button></span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% macro los_blok(p, titel, nr, zichtbaar, d, bijz) %}
+<div class="tf-grid los-blok" data-blok="{{ nr }}" style="grid-column:1/-1"{% if not zichtbaar %} hidden{% endif %}>
+  {% if nr > 1 %}<input type="hidden" class="bl-actief" name="los{{ nr }}_actief" value="{{ '1' if zichtbaar else '' }}">{% endif %}
+  <div class="tf-sec laad-kop" style="grid-column:1/-1"><span>{{ titel }}</span><span class="bl-knoppen"><button type="button" class="bl-plus" hidden title="Losadres toevoegen">+</button><button type="button" class="bl-min" hidden title="Losadres verwijderen">&minus;</button></span></div>
+  <span class="lbl">Losdatum / lostijd</span>
+  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
+    <span style="display:flex;gap:6px;align-items:center">
+      <input type="text" name="{{ p }}los_datum" value="{{ d.datum }}" style="display:none" placeholder="dd-mm-jjjj" inputmode="numeric">
+      <input type="date" class="kalender" title="Kies een datum in de kalender" onchange="kiesKalender(this)" style="width:auto">
+    </span>
+    <span id="{{ p }}lo_datum_lang" style="white-space:nowrap"></span>
+    <select name="{{ p }}los_tijd_van" aria-label="Lostijd van" style="min-width:120px">
+      <option value="">van…</option>
+      {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}"{% if d.tijd_van == tj %} selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span>tot</span>
+    <select name="{{ p }}los_tijd_tot" aria-label="Lostijd tot" style="min-width:120px">
+      <option value="">tot…</option>
+      {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}"{% if d.tijd_tot == tj %} selected{% endif %}>{{ tj }}</option>{% endfor %}
+    </select>
+    <span class="lbl">Openingstijden</span>
+    <input id="{{ p }}lo_openingstijden" readonly style="flex:1;min-width:120px">
+  </div>
+  <span class="lbl">Losplaats</span>
+  <div style="display:flex;gap:6px">
+    <input id="{{ p }}los_loc_veld" readonly value="{{ d.loc_label }}" placeholder="— kies een losplaats —" style="flex:1">
+    <input type="hidden" name="{{ p }}los_locatie_id" value="{{ d.loc_id }}">
+    <button type="button" onclick="openLocZoek('{{ p }}los_locatie_id')">Zoeken…</button>
+    <button type="button" onclick="wisLoc('{{ p }}los_locatie_id')" title="Losplaats verwijderen">Wis</button>
+  </div>
+  <span class="lbl">Ontvanger</span>
+  <input id="{{ p }}lo_naam" readonly>
+  <details class="lad-adres" style="grid-column:1/-1">
+    <summary>Details (adres, postcode, plaats en land losplaats)</summary>
+    <div class="lad-adres-grid">
+      <span class="lbl">Adres</span><input id="{{ p }}lo_adres" readonly>
+      <span class="lbl">Postcode</span><input id="{{ p }}lo_postcode" readonly>
+      <span class="lbl">Plaats</span><input id="{{ p }}lo_plaats" readonly>
+      <span class="lbl">Land</span><input id="{{ p }}lo_land" readonly>
+    </div>
+  </details>
+  <span class="lbl">Bijzonderheden lossen</span>
+  <div style="display:flex;gap:8px;grid-column:span 3">{{ bijz }}</div>
+</div>
+{% endmacro %}
+{% macro bijz_lossen(p, b) %}<select name="{{ p }}bijz_lossen_1"><option value="">—</option>{% for o in options.bijz_lossen_1 %}<option value="{{ o }}"{% if b.get('bijz_lossen_1') == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select><input name="{{ p }}bijz_lossen_2" value="{{ b.get('bijz_lossen_2') or '' }}">{% endmacro %}
+{% macro bijz_los(p, b) %}<select name="{{ p }}bijz_laden_1"><option value="">—</option>{% for o in options.bijz_laden_1 %}<option value="{{ o }}"{% if b.get('bijz_laden_1') == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select><input name="{{ p }}bijz_laden_2" value="{{ b.get('bijz_laden_2') or '' }}">{% endmacro %}
 
 <div class="tf-grid">
   <span class="lbl">Opdrachtnummer</span>
@@ -2521,101 +2812,20 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </details>
 
   <div class="tf-sec">Laden</div>
-  <span class="lbl">Laaddatum / laadtijd</span>
-  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
-    {{ ctl('laad_datum') }}
-    <span id="laad_datum_lang" style="white-space:nowrap"></span>
-    <select name="laad_tijd_van" aria-label="Laadtijd van" style="min-width:120px">
-      <option value="">van…</option>
-      {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
-    </select>
-    <span>tot</span>
-    <select name="laad_tijd_tot" aria-label="Laadtijd tot" style="min-width:120px">
-      <option value="">tot…</option>
-      {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['laad_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
-    </select>
-    <span class="lbl">Openingstijden</span>
-    <input id="l_openingstijden" readonly style="flex:1;min-width:120px">
-  </div>
-  <span class="lbl">Laadplaats</span>
-  <div style="display:flex;gap:6px">
-    <input id="laad_loc_veld" readonly value="{{ laad_label }}" placeholder="— kies een laadplaats —" style="flex:1">
-    <input type="hidden" name="laad_locatie_id" value="{{ t['laad_locatie_id'] or '' }}">
-    <button type="button" onclick="openLocZoek('laad_locatie_id')">Zoeken…</button>
-    <button type="button" onclick="wisLoc('laad_locatie_id')" title="Laadplaats verwijderen">Wis</button>
-  </div>
-  <span class="lbl">Laadplaats naam</span>
-  <input id="l_naam" readonly>
-  <details class="lad-adres" style="grid-column:1/-1">
-    <summary>Details (adres, postcode, plaats en land laadplaats)</summary>
-    <div class="lad-adres-grid">
-      <span class="lbl">Adres</span><input id="l_adres" readonly>
-      <span class="lbl">Postcode</span><input id="l_postcode" readonly>
-      <span class="lbl">Plaats</span><input id="l_plaats" readonly>
-      <span class="lbl">Land</span><input id="l_land" readonly>
-    </div>
-  </details>
-
-  <span class="lbl">Bijzonderheden laden</span>
-  <div style="display:flex;gap:8px;grid-column:span 3">{{ ctl('bijz_laden_1') }}{{ ctl('bijz_laden_2') }}</div>
-
-  <div class="lad-head" style="grid-column:1/-1">
-    <span class="lbl">Referentie</span><span class="lbl">Aantal</span><span class="lbl">Eenheid</span><span class="lbl">Laadomschrijving</span><span class="lbl">Gewicht (kg)</span><span class="lbl">LDM</span>
-  </div>
-  {% set laatste = (regels|list|max) if regels else 0 %}
-  {% set openn = laatste if laatste > 3 else 3 %}
-  {% for i in range(1, 6) %}{% set rr = regels.get(i, {}) %}
-  <div class="lad-det" data-i="{{ i }}" style="grid-column:1/-1" {% if i > openn %}hidden{% endif %}>
-    <div class="lad-row">
-      <input name="r{{ i }}_ref" value="{{ rr['ref'] or '' }}" placeholder="Laadnummer {{ i }}">
-      <input name="r{{ i }}_aantal" value="{{ rr['aantal'] or '' }}">
-      <input name="r{{ i }}_eenheid" value="{{ rr['eenheid'] or '' }}">
-      <input name="r{{ i }}_omschrijving" value="{{ rr['omschrijving'] or '' }}">
-      <input name="r{{ i }}_gewicht" value="{{ rr['gewicht'] or '' }}">
-      <input name="r{{ i }}_ldm" value="{{ rr['ldm'] or '' }}">
-      <span class="lad-knoppen"><button type="button" class="lad-plus" hidden title="Laadnummer toevoegen">+</button><button type="button" class="lad-min" hidden title="Laadnummer verwijderen">&minus;</button></span>
-    </div>
-  </div>
-  {% endfor %}
+  {% set bijz1 %}{{ ctl('bijz_laden_1') }}{{ ctl('bijz_laden_2') }}{% endset %}
+  {{ laad_blok('', 'Laadadres', 1, true, {'datum': t['laad_datum']|nl_datum, 'tijd_van': t['laad_tijd_van'], 'tijd_tot': t['laad_tijd_tot'], 'loc_id': t['laad_locatie_id'] or '', 'loc_label': laad_label}, bijz1, regels) }}
+  {% set e2 = extra.get(2) or {'d': {'datum': '', 'tijd_van': None, 'tijd_tot': None, 'loc_id': '', 'loc_label': ''}, 'regels': {}, 'bijz_laden_1': None, 'bijz_laden_2': None} %}
+  {% set e3 = extra.get(3) or {'d': {'datum': '', 'tijd_van': None, 'tijd_tot': None, 'loc_id': '', 'loc_label': ''}, 'regels': {}, 'bijz_laden_1': None, 'bijz_laden_2': None} %}
+  {{ laad_blok('b2_', 'Laadadres 2', 2, (2 in extra), e2.d, bijz_los('b2_', e2), e2.regels) }}
+  {{ laad_blok('b3_', 'Laadadres 3', 3, (3 in extra), e3.d, bijz_los('b3_', e3), e3.regels) }}
 
   <div class="tf-sec">Lossen</div>
-  <span class="lbl">Losdatum / lostijd</span>
-  <div style="display:flex;gap:8px;align-items:center;grid-column:span 3">
-    {{ ctl('los_datum') }}
-    <span id="lo_datum_lang" style="white-space:nowrap"></span>
-    <select name="los_tijd_van" aria-label="Lostijd van" style="min-width:120px">
-      <option value="">van…</option>
-      {% for tj in LAADTIJD_VAN_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_van'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
-    </select>
-    <span>tot</span>
-    <select name="los_tijd_tot" aria-label="Lostijd tot" style="min-width:120px">
-      <option value="">tot…</option>
-      {% for tj in LAADTIJD_TOT_OPTIES %}<option value="{{ tj }}" {% if t['los_tijd_tot'] == tj %}selected{% endif %}>{{ tj }}</option>{% endfor %}
-    </select>
-    <span class="lbl">Openingstijden</span>
-    <input id="lo_openingstijden" readonly style="flex:1;min-width:120px">
-  </div>
-  <span class="lbl">Losplaats</span>
-  <div style="display:flex;gap:6px">
-    <input id="los_loc_veld" readonly value="{{ los_label }}" placeholder="— kies een losplaats —" style="flex:1">
-    <input type="hidden" name="los_locatie_id" value="{{ t['los_locatie_id'] or '' }}">
-    <button type="button" onclick="openLocZoek('los_locatie_id')">Zoeken…</button>
-    <button type="button" onclick="wisLoc('los_locatie_id')" title="Losplaats verwijderen">Wis</button>
-  </div>
-  <span class="lbl">Ontvanger</span>
-  <input id="lo_naam" readonly>
-  <details class="lad-adres" style="grid-column:1/-1">
-    <summary>Details (adres, postcode, plaats en land losplaats)</summary>
-    <div class="lad-adres-grid">
-      <span class="lbl">Adres</span><input id="lo_adres" readonly>
-      <span class="lbl">Postcode</span><input id="lo_postcode" readonly>
-      <span class="lbl">Plaats</span><input id="lo_plaats" readonly>
-      <span class="lbl">Land</span><input id="lo_land" readonly>
-    </div>
-  </details>
-
-  <span class="lbl">Bijzonderheden lossen</span>
-  <div style="display:flex;gap:8px;grid-column:span 3">{{ ctl('bijz_lossen_1') }}{{ ctl('bijz_lossen_2') }}</div>
+  {% set bijz_l1 %}{{ ctl('bijz_lossen_1') }}{{ ctl('bijz_lossen_2') }}{% endset %}
+  {{ los_blok('', 'Losadres', 1, true, {'datum': t['los_datum']|nl_datum, 'tijd_van': t['los_tijd_van'], 'tijd_tot': t['los_tijd_tot'], 'loc_id': t['los_locatie_id'] or '', 'loc_label': los_label}, bijz_l1) }}
+  {% set l2 = extra_los.get(2) or {'d': {'datum': '', 'tijd_van': None, 'tijd_tot': None, 'loc_id': '', 'loc_label': ''}, 'bijz_lossen_1': None, 'bijz_lossen_2': None} %}
+  {% set l3 = extra_los.get(3) or {'d': {'datum': '', 'tijd_van': None, 'tijd_tot': None, 'loc_id': '', 'loc_label': ''}, 'bijz_lossen_1': None, 'bijz_lossen_2': None} %}
+  {{ los_blok('los2_', 'Losadres 2', 2, (2 in extra_los), l2.d, bijz_lossen('los2_', l2)) }}
+  {{ los_blok('los3_', 'Losadres 3', 3, (3 in extra_los), l3.d, bijz_lossen('los3_', l3)) }}
 
   <div class="tf-sec">Overig</div>
   {{ f('europalletten') }}
@@ -2791,8 +3001,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   // locaties (laad- en losplaatsen): vul de velden in vanuit de gekozen locatie
   // locaties worden op de server gezocht; de gegevens van een gekozen locatie worden opgehaald
   const LOC = {};
-  const LOC_VELD = {laad_locatie_id: 'laad_loc_veld', los_locatie_id: 'los_loc_veld'};
-  const LOC_PREFIX = {laad_locatie_id: 'l_', los_locatie_id: 'lo_'};
+  const LOC_VELD = {laad_locatie_id: 'laad_loc_veld', los_locatie_id: 'los_loc_veld',
+                    b2_laad_locatie_id: 'b2_laad_loc_veld', b3_laad_locatie_id: 'b3_laad_loc_veld',
+                    los2_los_locatie_id: 'los2_los_loc_veld', los3_los_locatie_id: 'los3_los_loc_veld'};
+  const LOC_PREFIX = {laad_locatie_id: 'l_', los_locatie_id: 'lo_',
+                      b2_laad_locatie_id: 'b2_l_', b3_laad_locatie_id: 'b3_l_',
+                      los2_los_locatie_id: 'los2_lo_', los3_los_locatie_id: 'los3_lo_'};
   let zoekLocVeld = 'laad_locatie_id';
   let zoekLocNr = 0;
   let zoekLocTimer = null;
@@ -2821,7 +3035,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   }
   function openLocZoek(veld) {
     zoekLocVeld = veld;
-    document.getElementById('loc_titel').textContent = veld === 'laad_locatie_id' ? 'Laadplaats zoeken' : 'Losplaats zoeken';
+    document.getElementById('loc_titel').textContent = veld.endsWith('laad_locatie_id') ? 'Laadplaats zoeken' : 'Losplaats zoeken';
     zoekLoc();
     document.getElementById('dlg_loc').showModal();
     document.getElementById('loc_naam').focus();
@@ -3030,33 +3244,68 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
       vorige = sel.value;
     });
   })();
-  // laadregels: alleen zichtbare regels; + voegt een regel toe (max 5), − op de laatste regel (2 of meer) verwijdert die
-  const ladRijen = [...document.querySelectorAll('.lad-det')];
-  let ladAantal = Math.max(3, ladRijen.filter(d => !d.hidden).length);
-  function toonLaadRijen() {
-    ladRijen.forEach(d => {
-      const i = +d.dataset.i;
-      d.hidden = i > ladAantal;
-      d.querySelector('.lad-plus').hidden = !(i === ladAantal && ladAantal < ladRijen.length);
-      d.querySelector('.lad-min').hidden = !(i === ladAantal && ladAantal > 1);
+  // laad- en losadressen (1 t/m 3): het eerste is altijd zichtbaar; met + erbij (max 3), met − op het laatste weer weg
+  function blokBeheer(klasse) {
+    const blokken = [...document.querySelectorAll('.' + klasse)];
+    const soort = klasse === 'los-blok' ? 'Losadres' : 'Laadadres';
+    let aantal = Math.max(1, blokken.filter(b => !b.hidden).length);
+    function toonBlokken() {
+      blokken.forEach((b, idx) => {
+        const n = idx + 1;
+        b.hidden = n > aantal;
+        const actief = b.querySelector('.bl-actief');
+        if (actief) actief.value = n <= aantal ? '1' : '';
+        b.querySelector('.bl-plus').hidden = !(n === aantal && aantal < blokken.length);
+        b.querySelector('.bl-min').hidden = !(n === aantal && aantal > 1);
+      });
+    }
+    blokken.forEach((b, idx) => {
+      const n = idx + 1;
+      b.querySelector('.bl-plus').addEventListener('click', () => {
+        if (aantal >= blokken.length) return;
+        aantal++;
+        toonBlokken();
+      });
+      b.querySelector('.bl-min').addEventListener('click', () => {
+        const velden = [...b.querySelectorAll('input:not(.bl-actief), select')];
+        if (velden.some(el => el.value.trim() !== '') && !confirm(soort + ' ' + n + ' leegmaken en verwijderen?')) return;
+        velden.forEach(el => { el.value = ''; });
+        b.querySelectorAll('[id$="datum_lang"]').forEach(el => { el.textContent = ''; });
+        aantal--;
+        toonBlokken();
+      });
+      // laadnummers van dit laadadres: + voegt een regel toe (max 5), − op de laatste regel (2 of meer) verwijdert die
+      const rijen = [...b.querySelectorAll('.lad-det')];
+      let ladAantal = Math.max(3, rijen.filter(d => !d.hidden).length);
+      function toonRijen() {
+        rijen.forEach(d => {
+          const i = +d.dataset.i;
+          d.hidden = i > ladAantal;
+          d.querySelector('.lad-plus').hidden = !(i === ladAantal && ladAantal < rijen.length);
+          d.querySelector('.lad-min').hidden = !(i === ladAantal && ladAantal > 1);
+        });
+      }
+      rijen.forEach(d => {
+        d.querySelector('.lad-plus').addEventListener('click', () => {
+          if (ladAantal >= rijen.length) return;
+          ladAantal++;
+          toonRijen();
+          rijen[ladAantal - 1].querySelector('input').focus();
+        });
+        d.querySelector('.lad-min').addEventListener('click', () => {
+          const inputs = [...d.querySelectorAll('input')];
+          if (inputs.some(el => el.value.trim() !== '') && !confirm('Laadnummer ' + d.dataset.i + ' leegmaken en verwijderen?')) return;
+          inputs.forEach(el => el.value = '');
+          ladAantal--;
+          toonRijen();
+        });
+      });
+      toonRijen();
     });
+    toonBlokken();
   }
-  ladRijen.forEach(d => {
-    d.querySelector('.lad-plus').addEventListener('click', () => {
-      if (ladAantal >= ladRijen.length) return;
-      ladAantal++;
-      toonLaadRijen();
-      ladRijen[ladAantal - 1].querySelector('input').focus();
-    });
-    d.querySelector('.lad-min').addEventListener('click', () => {
-      const inputs = [...d.querySelectorAll('input')];
-      if (inputs.some(el => el.value.trim() !== '') && !confirm('Laadnummer ' + d.dataset.i + ' leegmaken en verwijderen?')) return;
-      inputs.forEach(el => el.value = '');
-      ladAantal--;
-      toonLaadRijen();
-    });
-  });
-  toonLaadRijen();
+  blokBeheer('laad-blok');
+  blokBeheer('los-blok');
   // kalenderknop: kiest de datum in het dd-mm-jjjj-veld ernaast; een eventueel ingevulde tijd blijft staan
   function kiesKalender(el) {
     if (!el.value) return;
@@ -3064,10 +3313,12 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     const [j, m, d] = el.value.split('-');
     const tijd = txt.value.match(/ ([0-9]{1,2}:[0-9]{2})$/);
     txt.value = d + '-' + m + '-' + j + (tijd ? ' ' + tijd[1] : '');
-    if (txt.name === 'los_datum' || txt.name === 'laad_datum') toonDatumLang(txt.name);
+    if (DATUM_LANG[txt.name]) toonDatumLang(txt.name);
   }
   // datum voluit weergeven, bv. woensdag 14 okt 2026 (het opgeslagen dd-mm-jjjj blijft ongewijzigd)
-  const DATUM_LANG = { laad_datum: 'laad_datum_lang', los_datum: 'lo_datum_lang' };
+  const DATUM_LANG = { laad_datum: 'laad_datum_lang', los_datum: 'lo_datum_lang',
+                       b2_laad_datum: 'b2_laad_datum_lang', b3_laad_datum: 'b3_laad_datum_lang',
+                       los2_los_datum: 'los2_lo_datum_lang', los3_los_datum: 'los3_lo_datum_lang' };
   function toonDatumLang(veld) {
     const inp = document.querySelector('input[name=' + veld + ']');
     const el = document.getElementById(DATUM_LANG[veld]);
@@ -3081,6 +3332,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   }
   toonDatumLang('laad_datum');
   toonDatumLang('los_datum');
+  toonDatumLang('b2_laad_datum');
+  toonDatumLang('b3_laad_datum');
+  toonDatumLang('los2_los_datum');
+  toonDatumLang('los3_los_datum');
   // kalender tonen op de datum die al in het veld staat
   document.querySelectorAll('input.kalender').forEach(k => {
     const txt = k.parentElement.querySelector('input[type=text]');
@@ -3093,6 +3348,10 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   showCarrier(true);
   showLoc('laad_locatie_id', 'l_');
   showLoc('los_locatie_id', 'lo_');
+  showLoc('b2_laad_locatie_id', 'b2_l_');
+  showLoc('b3_laad_locatie_id', 'b3_l_');
+  showLoc('los2_los_locatie_id', 'los2_lo_');
+  showLoc('los3_los_locatie_id', 'los3_lo_');
 </script>
 {% endblock %}""",
 
@@ -3132,6 +3391,39 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     {% for i, r in regels.items() %}
       {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
     {% endfor %}
+  </td></tr>
+  {% endif %}
+  {% if extra %}
+  <tr><th style="width:220px">Meer laadadressen</th><td>
+    <details>
+      <summary style="cursor:pointer">{{ extra|length }} extra laadadres{{ 'sen' if extra|length > 1 else '' }} tonen</summary>
+      {% for nr, b in extra.items() %}
+      <div style="margin:8px 0 12px;padding-left:10px;border-left:3px solid #edebe9">
+        <b>Laadadres {{ nr }}</b><br>
+        Laaddatum / laadtijd: {{ b.d.datum or '-' }}{% if b.laad_tijd_van or b.laad_tijd_tot %} · {{ b.laad_tijd_van or '' }} tot {{ b.laad_tijd_tot or '' }}{% endif %}<br>
+        Laadplaats: {{ b.d.loc_label or '-' }}<br>
+        {% if b.bijz_laden_1 or b.bijz_laden_2 %}Bijzonderheden: {{ b.bijz_laden_1 or '' }} {{ b.bijz_laden_2 or '' }}<br>{% endif %}
+        {% for i, r in b.regels.items() %}
+          Laadnummer: {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </details>
+  </td></tr>
+  {% endif %}
+  {% if extra_los %}
+  <tr><th style="width:220px">Meer losadressen</th><td>
+    <details>
+      <summary style="cursor:pointer">{{ extra_los|length }} extra losadres{{ 'sen' if extra_los|length > 1 else '' }} tonen</summary>
+      {% for nr, b in extra_los.items() %}
+      <div style="margin:8px 0 12px;padding-left:10px;border-left:3px solid #edebe9">
+        <b>Losadres {{ nr }}</b><br>
+        Losdatum / lostijd: {{ b.d.datum or '-' }}{% if b.los_tijd_van or b.los_tijd_tot %} · {{ b.los_tijd_van or '' }} tot {{ b.los_tijd_tot or '' }}{% endif %}<br>
+        Losplaats: {{ b.d.loc_label or '-' }}<br>
+        {% if b.bijz_lossen_1 or b.bijz_lossen_2 %}Bijzonderheden: {{ b.bijz_lossen_1 or '' }} {{ b.bijz_lossen_2 or '' }}<br>{% endif %}
+      </div>
+      {% endfor %}
+    </details>
   </td></tr>
   {% endif %}
 </table>

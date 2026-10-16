@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.131 - 16-10-2026 21:20"
+APP_VERSIE = "1.132 - 16-10-2026 21:25"
 
 
 @app.after_request
@@ -3419,6 +3419,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% if kind.startswith('rel_') %}
     {% set r = related[name] %}
     <tr><th style="width:220px">{{ label }}</th><td>{% if r %}{% if kind == 'rel_locatie' %}{{ r['code'] }} – {{ r['name'] }}{% set adr = [r['adres'], r['postcode'], r['plaats'], r['land']]|select|join(' · ') %}{% if adr %}<br><span style="color:#605e5c">{{ adr }}</span>{% endif %}{% if r['openingstijden'] %}<br><span style="color:#605e5c">Openingstijden: {{ r['openingstijden'] }}</span>{% endif %}{% else %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }} – {{ r['name'] }}</a>{% endif %}{% else %}-{% endif %}</td></tr>
+  {% elif name in ('laad_tijd_van', 'laad_tijd_tot', 'los_tijd_van', 'los_tijd_tot') %}
+  {% elif name in ('laad_datum', 'los_datum') %}
+    {% set tv = 'laad_tijd_van' if name == 'laad_datum' else 'los_tijd_van' %}
+    {% set tt = 'laad_tijd_tot' if name == 'laad_datum' else 'los_tijd_tot' %}
+    <tr><th style="width:220px">{{ 'Laaddatum / laadtijd' if name == 'laad_datum' else 'Losdatum / lostijd' }}</th><td>{{ t[name]|nl_datum or '-' }}{% if t[tv] or t[tt] %} · {{ t[tv] or '' }} tot {{ t[tt] or '' }}{% endif %}</td></tr>
   {% else %}
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name]|nl_datum if kind in ('date', 'datetime') else (t[name] if t[name] is not none else '')) }}</td></tr>
   {% endif %}

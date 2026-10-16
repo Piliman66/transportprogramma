@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.116 - 16-10-2026 18:50"
+APP_VERSIE = "1.117 - 16-10-2026 19:00"
 
 
 @app.after_request
@@ -2323,14 +2323,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
   .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
   .tf-compact select[name="status"], .tf-compact #status_tijd { width: 50%; }
-  .mk-box select[hidden] { display: none; }
-  .tf-compact .mk-pop > summary { padding: 3px 8px !important; border: 1px solid #c8c6c4; border-radius: 4px; background: #fff; cursor: pointer; list-style: none; }
-  .mk-pop[open] > summary { border-color: #0078d4; }
-  .mk-kolommen { columns: 3; column-gap: 18px; max-height: 320px; overflow-y: auto; margin-top: 4px; padding: 8px; border: 1px solid #c8c6c4; border-radius: 4px; background: #fff; }
-  .mk-groep { break-inside: avoid; margin-bottom: 8px; }
-  .mk-groep > b { display: block; font-size: 12px; color: #605e5c; margin-bottom: 2px; }
-  .mk-optie { display: block; width: 100%; text-align: left; background: none; border: none; padding: 3px 4px; cursor: pointer; font-size: 13px; color: #201f1e; }
-  .mk-optie:hover, .mk-optie:focus { background: #f3f2f1; }
+  .eig-kolommen { columns: 3; column-gap: 18px; padding: 4px 0 8px; }
+  .eig-groep { break-inside: avoid; margin-bottom: 8px; }
+  .eig-groep > b { display: block; font-size: 12px; color: #605e5c; margin-bottom: 2px; }
+  .eig-optie { display: block; font-size: 13px; padding: 1px 0; cursor: pointer; }
+  .eig-optie input { margin: 0 6px 0 0; }
   .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
   .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
   .tf-compact .lad-adres-grid input { width: 100%; }
@@ -2525,14 +2522,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   </div>
   <div style="grid-column:1/-1">
     <span class="lbl">Eigenschappen &amp; certificaten</span>
-    <div class="mk-box">
-      <div class="mk-chips" id="mk_eigenschap">{% for val, lab in eig_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="eigenschap" value="{{ val }}"></span>{% endfor %}</div>
-      <select data-naam="eigenschap" onchange="mkKies(this)" hidden><option value="">+ kies…</option>{% for lab, items in eig_groepen %}<optgroup label="{{ lab }}">{% for soort, naam in items %}<option value="{{ soort }}|{{ naam }}">{{ naam }}</option>{% endfor %}</optgroup>{% endfor %}</select>
-      <details class="mk-pop">
-        <summary>+ kies…</summary>
-        <div class="mk-kolommen">{% for lab, items in eig_groepen %}<div class="mk-groep"><b>{{ lab }}</b>{% for soort, naam in items %}<button type="button" class="mk-optie" data-waarde="{{ soort }}|{{ naam }}">{{ naam }}</button>{% endfor %}</div>{% endfor %}</div>
-      </details>
-    </div>
+    {% set gekozen_vals = eig_gekozen|map(attribute=0)|list %}
+    <div class="eig-kolommen">{% for lab, items in eig_groepen %}<div class="eig-groep"><b>{{ lab }}</b>{% for soort, naam in items %}<label class="eig-optie"><input type="checkbox" name="eigenschap" value="{{ soort }}|{{ naam }}"{% if (soort ~ '|' ~ naam) in gekozen_vals %} checked{% endif %}> {{ naam }}</label>{% endfor %}</div>{% endfor %}</div>
   </div>
   <script>
   function mkKies(sel) {
@@ -2561,13 +2552,6 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     sel.value = '';
   }
   function mkWis(knop) { knop.parentElement.remove(); }
-  // eigenschappen: kiezen uit het paneel met drie kolommen
-  document.querySelectorAll('.mk-optie').forEach(b => b.addEventListener('click', () => {
-    const sel = document.querySelector('select[data-naam="eigenschap"]');
-    sel.value = b.dataset.waarde;
-    mkKies(sel);
-    b.closest('details').open = false;
-  }));
   </script>
 
   <div class="tf-sec">Laden</div>

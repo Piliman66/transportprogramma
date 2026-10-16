@@ -471,7 +471,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.115 - 16-10-2026 18:40"
+APP_VERSIE = "1.119 - 16-10-2026 19:30"
 
 
 @app.after_request
@@ -2323,6 +2323,11 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   .tf-compact .tf-grid > div[style*="align-items:center"] { flex-wrap: wrap; min-width: 0; }
   .tf-compact .tf-grid > div[style*="align-items:center"] > select { width: auto; }
   .tf-compact select[name="status"], .tf-compact #status_tijd { width: 50%; }
+  .eig-kolommen { columns: 3; column-gap: 18px; padding: 4px 0 8px; }
+  .eig-groep { break-inside: avoid; margin-bottom: 8px; }
+  .eig-groep > b { display: block; font-size: 12px; color: #605e5c; margin-bottom: 2px; }
+  .eig-optie { display: block; font-size: 13px; padding: 1px 0; cursor: pointer; }
+  .eig-optie input { margin: 0 6px 0 0; }
   .tf-compact .lad-adres summary { cursor: pointer; padding: 4px 0; font-size: 13px; }
   .tf-compact .lad-adres-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr) 150px minmax(0, 1fr); gap: 6px 10px; padding: 6px 0; }
   .tf-compact .lad-adres-grid input { width: 100%; }
@@ -2499,57 +2504,21 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
     .mk-box select { border: none; max-width: 100%; background: transparent; }
   </style>
   <div class="tf-sec">Voertuigeisen</div>
-  <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
-    <div>
-      <span class="lbl">Voertuigtype *</span>
-      <div class="mk-box">
-        <div class="mk-chips" id="mk_voertuigtype">{% for val, lab in vt_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="voertuigtype" value="{{ val }}"></span>{% endfor %}</div>
-        <select data-naam="voertuigtype" onchange="mkKies(this)"><option value="">+ kies…</option>{% for o in vt_opties %}<option value="{{ o }}">{{ o }}</option>{% endfor %}</select>
-      </div>
-    </div>
-    <div>
-      <span class="lbl">Opbouwtypes *</span>
-      <div class="mk-box">
-        <div class="mk-chips" id="mk_opbouwtype">{% for val, lab in ob_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="opbouwtype" value="{{ val }}"></span>{% endfor %}</div>
-        <select data-naam="opbouwtype" onchange="mkKies(this)"><option value="">+ kies…</option>{% for o in ob_opties %}<option value="{{ o }}">{{ o }}</option>{% endfor %}</select>
-      </div>
-    </div>
+  <div style="grid-column:1/-1">
+    <span class="lbl">Voertuigtype *</span>
+    {% set vt_vals = vt_gekozen|map(attribute=0)|list %}
+    <div class="eig-kolommen">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
   </div>
   <div style="grid-column:1/-1">
-    <span class="lbl">Eigenschappen &amp; certificaten</span>
-    <div class="mk-box">
-      <div class="mk-chips" id="mk_eigenschap">{% for val, lab in eig_gekozen %}<span class="mk-chip">{{ lab }} <button type="button" onclick="mkWis(this)" title="Verwijderen">×</button><input type="hidden" name="eigenschap" value="{{ val }}"></span>{% endfor %}</div>
-      <select data-naam="eigenschap" onchange="mkKies(this)"><option value="">+ kies…</option>{% for lab, items in eig_groepen %}<optgroup label="{{ lab }}">{% for soort, naam in items %}<option value="{{ soort }}|{{ naam }}">{{ naam }}</option>{% endfor %}</optgroup>{% endfor %}</select>
-    </div>
+    <span class="lbl">Opbouwtypes *</span>
+    {% set ob_vals = ob_gekozen|map(attribute=0)|list %}
+    <div class="eig-kolommen">{% for o in ob_opties %}<label class="eig-optie"><input type="checkbox" name="opbouwtype" value="{{ o }}"{% if o in ob_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
   </div>
-  <script>
-  function mkKies(sel) {
-    if (!sel.value) return;
-    const naam = sel.dataset.naam;
-    const chips = document.getElementById('mk_' + naam);
-    for (const i of chips.querySelectorAll('input')) {
-      if (i.value === sel.value) { sel.value = ''; return; }
-    }
-    const opt = sel.options[sel.selectedIndex];
-    const chip = document.createElement('span');
-    chip.className = 'mk-chip';
-    chip.appendChild(document.createTextNode(opt.textContent + ' '));
-    const x = document.createElement('button');
-    x.type = 'button';
-    x.title = 'Verwijderen';
-    x.textContent = '×';
-    x.onclick = function () { mkWis(x); };
-    const h = document.createElement('input');
-    h.type = 'hidden';
-    h.name = naam;
-    h.value = sel.value;
-    chip.appendChild(x);
-    chip.appendChild(h);
-    chips.appendChild(chip);
-    sel.value = '';
-  }
-  function mkWis(knop) { knop.parentElement.remove(); }
-  </script>
+  <details style="grid-column:1/-1"{% if eig_gekozen %} open{% endif %}>
+    <summary class="lbl" style="cursor:pointer">Eigenschappen &amp; certificaten ({{ eig_gekozen|length }} gekozen)</summary>
+    {% set gekozen_vals = eig_gekozen|map(attribute=0)|list %}
+    <div class="eig-kolommen">{% for lab, items in eig_groepen %}<div class="eig-groep"><b>{{ lab }}</b>{% for soort, naam in items %}<label class="eig-optie"><input type="checkbox" name="eigenschap" value="{{ soort }}|{{ naam }}"{% if (soort ~ '|' ~ naam) in gekozen_vals %} checked{% endif %}> {{ naam }}</label>{% endfor %}</div>{% endfor %}</div>
+  </details>
 
   <div class="tf-sec">Laden</div>
   <span class="lbl">Laaddatum / laadtijd</span>

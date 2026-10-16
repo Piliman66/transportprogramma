@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.126 - 16-10-2026 20:50"
+APP_VERSIE = "1.128 - 16-10-2026 21:05"
 
 
 @app.after_request
@@ -887,6 +887,18 @@ def save_laadadressen(tid, extra):
         save_laadregels(tid, b["regels"], nr)
 
 
+def locatie_adres(lid):
+    """Adres en openingstijden van een locatie, voor de weergave van extra laad- en losadressen."""
+    if not lid:
+        return "", ""
+    r = get_db().execute("SELECT adres, postcode, plaats, land, openingstijden FROM locaties WHERE id = ?",
+                         (lid,)).fetchone()
+    if r is None:
+        return "", ""
+    adr = " · ".join(x for x in [r["adres"], r["postcode"], r["plaats"], r["land"]] if x)
+    return adr, (r["openingstijden"] or "")
+
+
 def laadblokken_voor_formulier(extra):
     """Voegt per extra laadadres de waarden toe die het formulier toont."""
     for b in extra.values():
@@ -896,6 +908,8 @@ def laadblokken_voor_formulier(extra):
             "tijd_tot": b.get("laad_tijd_tot"),
             "loc_id": b.get("laad_locatie_id") or "",
             "loc_label": locatie_label(b.get("laad_locatie_id")),
+            "adres": locatie_adres(b.get("laad_locatie_id"))[0],
+            "openingstijden": locatie_adres(b.get("laad_locatie_id"))[1],
         }
     return extra
 
@@ -953,6 +967,8 @@ def losblokken_voor_formulier(extra):
             "tijd_tot": b.get("los_tijd_tot"),
             "loc_id": b.get("los_locatie_id") or "",
             "loc_label": locatie_label(b.get("los_locatie_id")),
+            "adres": locatie_adres(b.get("los_locatie_id"))[0],
+            "openingstijden": locatie_adres(b.get("los_locatie_id"))[1],
         }
     return extra
 
@@ -1259,7 +1275,8 @@ def transport_detail(tid):
         related[key] = None
         if t[key] and key.endswith("locatie_id"):
             related[key] = db.execute(
-                "SELECT id, code, naam AS name FROM locaties WHERE id = ?", (t[key],)).fetchone()
+                "SELECT id, code, naam AS name, adres, postcode, plaats, land, openingstijden "
+                "FROM locaties WHERE id = ?", (t[key],)).fetchone()
         elif t[key]:
             related[key] = db.execute(
                 "SELECT id, code, name FROM relaties WHERE id = ?", (t[key],)).fetchone()
@@ -1267,7 +1284,9 @@ def transport_detail(tid):
                            fields=[f for f in TRANSPORT_FIELDS if f[0] not in OUDE_LAADVELDEN],
                            related=related, regels=load_laadregels(tid),
                            extra=laadblokken_voor_formulier(laadadressen_uit_db(tid)),
-                           extra_los=losblokken_voor_formulier(losadressen_uit_db(tid)))
+                           extra_los=losblokken_voor_formulier(losadressen_uit_db(tid)),
+                           ve=voertuigeisen_uit_db(tid),
+                           eig_soorten=[(s, VOERTUIG_SOORTEN[s]) for s, _ in VOERTUIG_EIGENSCHAP_SOORTEN])
 
 
 @app.route("/transporten/<int:tid>/bewerk", methods=["GET", "POST"])
@@ -3393,11 +3412,14 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   {% for name, label, kind in fields %}
   {% if kind.startswith('rel_') %}
     {% set r = related[name] %}
-    <tr><th style="width:220px">{{ label }}</th><td>{% if r %}{% if kind == 'rel_locatie' %}{{ r['code'] }} – {{ r['name'] }}{% else %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }} – {{ r['name'] }}</a>{% endif %}{% else %}-{% endif %}</td></tr>
+    <tr><th style="width:220px">{{ label }}</th><td>{% if r %}{% if kind == 'rel_locatie' %}{{ r['code'] }} – {{ r['name'] }}{% set adr = [r['adres'], r['postcode'], r['plaats'], r['land']]|select|join(' · ') %}{% if adr %}<br><span style="color:#605e5c">{{ adr }}</span>{% endif %}{% if r['openingstijden'] %}<br><span style="color:#605e5c">Openingstijden: {{ r['openingstijden'] }}</span>{% endif %}{% else %}<a href="{{ url_for('relatie_detail', rid=r['id']) }}">{{ r['code'] }} – {{ r['name'] }}</a>{% endif %}{% else %}-{% endif %}</td></tr>
   {% else %}
     <tr><th style="width:220px">{{ label }}</th><td style="white-space:pre-line">{{ ('Ja' if t[name] else 'Nee') if kind == 'bool' else (t[name]|nl_datum if kind in ('date', 'datetime') else (t[name] if t[name] is not none else '')) }}</td></tr>
   {% endif %}
   {% endfor %}
+  <tr><th style="width:220px">Voertuigtype</th><td>{{ ve['voertuigtype']|join(', ') or '-' }}</td></tr>
+  <tr><th style="width:220px">Opbouwtypes</th><td>{{ ve['opbouwtype']|join(', ') or '-' }}</td></tr>
+  {% for s, lab in eig_soorten %}{% if ve[s] %}<tr><th style="width:220px">{{ lab }}</th><td>{{ ve[s]|join(', ') }}</td></tr>{% endif %}{% endfor %}
   {% if regels %}
   <tr><th style="width:220px">Laadnummers</th><td>
     {% for i, r in regels.items() %}
@@ -3414,6 +3436,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
         <b>Laadadres {{ nr }}</b><br>
         Laaddatum / laadtijd: {{ b.d.datum or '-' }}{% if b.laad_tijd_van or b.laad_tijd_tot %} · {{ b.laad_tijd_van or '' }} tot {{ b.laad_tijd_tot or '' }}{% endif %}<br>
         Laadplaats: {{ b.d.loc_label or '-' }}<br>
+        {% if b.d.adres %}Adres laadplaats: {{ b.d.adres }}<br>{% endif %}
+        {% if b.d.openingstijden %}Openingstijden laadplaats: {{ b.d.openingstijden }}<br>{% endif %}
         {% if b.bijz_laden_1 or b.bijz_laden_2 %}Bijzonderheden: {{ b.bijz_laden_1 or '' }} {{ b.bijz_laden_2 or '' }}<br>{% endif %}
         {% for i, r in b.regels.items() %}
           Laadnummer: {{ r['ref'] or '' }} · {{ r['aantal'] or '' }} {{ r['eenheid'] or '' }} · {{ r['omschrijving'] or '' }} · {{ r['gewicht'] or '' }} kg · LDM {{ r['ldm'] or '' }}<br>
@@ -3432,6 +3456,8 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
         <b>Losadres {{ nr }}</b><br>
         Losdatum / lostijd: {{ b.d.datum or '-' }}{% if b.los_tijd_van or b.los_tijd_tot %} · {{ b.los_tijd_van or '' }} tot {{ b.los_tijd_tot or '' }}{% endif %}<br>
         Losplaats: {{ b.d.loc_label or '-' }}<br>
+        {% if b.d.adres %}Adres losplaats: {{ b.d.adres }}<br>{% endif %}
+        {% if b.d.openingstijden %}Openingstijden losplaats: {{ b.d.openingstijden }}<br>{% endif %}
         {% if b.bijz_lossen_1 or b.bijz_lossen_2 %}Bijzonderheden: {{ b.bijz_lossen_1 or '' }} {{ b.bijz_lossen_2 or '' }}<br>{% endif %}
       </div>
       {% endfor %}

@@ -499,7 +499,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.141 - 16-10-2026 23:25"
+APP_VERSIE = "1.142 - 16-10-2026 23:45"
 
 
 @app.after_request
@@ -3655,7 +3655,7 @@ table.een-regel th,table.een-regel td{white-space:nowrap}
   <div><small>Naam</small><br><strong>{{ c['name'] }}</strong></div>
   <div><small>Soort</small><br>{{ SOORTEN[c['soort']][1] }}</div>
   <div><small>Telefoon</small><br>{{ c['telefoon'] or '–' }}</div>
-  <div><small>E-mail</small><br>{{ c['email'] or '–' }}</div>
+  <div><small>E-mail planning</small><br>{{ c['email_planning'] or '–' }}</div>
   <div><small>Plaats</small><br>{{ c['visit_city'] or '–' }}</div>
   <div><small>Transporten</small><br>{{ used|length }}</div>
 </div>

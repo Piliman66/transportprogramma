@@ -92,6 +92,7 @@ TRANSPORT_FIELDS = [
     ("referentie", "Referentie", "text"),
     ("vehicle_plate", "Kenteken", "text"),
     ("oplegger", "Oplegger / trailer", "text"),
+    ("afmeting_voertuig", "Afmeting voertuig", "text"),
     ("laden_met", "Laden met", "ladenmet"),
     ("invoice_status", "Factuurontvangst", "select"),
     ("price", "Prijs (€)", "text"),
@@ -173,6 +174,9 @@ CREATE TABLE IF NOT EXISTS laden_met_opties (
     naam TEXT PRIMARY KEY
 );
 INSERT OR IGNORE INTO laden_met_opties (naam) VALUES ('13,6 ldm Huif - Tautliner trailer');
+CREATE TABLE IF NOT EXISTS afmeting_voertuig_opties (
+    naam TEXT PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS voertuigtype_opties (
     naam TEXT PRIMARY KEY
 );
@@ -507,7 +511,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.154 - 17-10-2026 17:00"
+APP_VERSIE = "1.156 - 17-10-2026 17:25"
 
 
 @app.after_request
@@ -757,6 +761,11 @@ def parse_transport_form():
     if nieuw_lm:
         get_db().execute("INSERT OR IGNORE INTO laden_met_opties (naam) VALUES (?)", (nieuw_lm,))
         data["laden_met"] = nieuw_lm
+    # een zelf toegevoegde afmeting voertuig wordt bewaard in de keuzelijst
+    nieuw_afm = request.form.get("nieuwe_afmeting_voertuig", "").strip()
+    if nieuw_afm:
+        get_db().execute("INSERT OR IGNORE INTO afmeting_voertuig_opties (naam) VALUES (?)", (nieuw_afm,))
+        data["afmeting_voertuig"] = nieuw_afm
     # zolang het transport in de eerste twee stappen zit, bepaalt de vervoerder de status
     if data["status"] in ("nog indelen", "ingedeeld"):
         data["status"] = "ingedeeld" if data["carrier_id"] else "nog indelen"
@@ -1091,6 +1100,13 @@ def render_form(t, title, action):
     if huidig and huidig not in afdelingen:
         afdelingen.append(huidig)  # oude waarde blijft zichtbaar
     laden_met = [r["naam"] for r in db.execute("SELECT naam FROM laden_met_opties ORDER BY naam")]
+    afmeting = [r["naam"] for r in db.execute("SELECT naam FROM afmeting_voertuig_opties ORDER BY naam")]
+    try:
+        huidig_afm = t["afmeting_voertuig"]
+    except (KeyError, IndexError, TypeError):
+        huidig_afm = None
+    if huidig_afm and huidig_afm not in afmeting:
+        afmeting.append(huidig_afm)  # oude waarde blijft zichtbaar
     try:
         huidig_lm = t["laden_met"]
     except (KeyError, IndexError, TypeError):
@@ -1133,7 +1149,8 @@ def render_form(t, title, action):
                        key=lambda n: (OPBOUW_VOORAAN.index(n) if n in OPBOUW_VOORAAN else len(OPBOUW_VOORAAN), n))
     eig_groepen = [(VOERTUIG_SOORTEN[s], [(s, r["naam"]) for r in db.execute(
         f"SELECT naam FROM {tabel} ORDER BY naam")]) for s, tabel in VOERTUIG_EIGENSCHAP_SOORTEN]
-    opties = dict(OPTIONS, status=status_lijst(db), afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
+    opties = dict(OPTIONS, status=status_lijst(db), afdeling=afdelingen, laden_met=laden_met,
+                  afmeting_voertuig=afmeting, email_planning=ep, **bz_opties)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, extra=extra, extra_los=extra_los, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, laad_label=laad_label, los_label=los_label,
@@ -2045,6 +2062,8 @@ BEHEER_LIJSTEN = {
     "voertuig_lading": {"tabel": "voertuig_lading_opties", "kolommen": [],
                         "titel": "Voertuig eigenschappen – Ladingsbeveiliging",
                         "uitleg": "Onderdeel Ladingsbeveiliging van het keuzemenu Voertuig eigenschappen."},
+    "afmeting_voertuig": {"tabel": "afmeting_voertuig_opties", "kolommen": [], "titel": "Afmeting voertuig",
+                          "uitleg": "Deze lijst zie je als keuzemenu Afmeting voertuig achter Voertuigtype op het transportformulier."},
     "landcodes": {"tabel": "landcodes", "kolommen": [], "titel": "Landcodes",
                   "uitleg": "Lijst met landcodes in de vorm code – land (landnummer). Hier kun je namen wijzigen, toevoegen of verwijderen."},
 }
@@ -2868,7 +2887,15 @@ table.een-regel tr:hover td{background:#deecf9}
   <div style="grid-column:1/-1">
     <span class="lbl">Voertuigtype *</span>
     {% set vt_vals = vt_gekozen|map(attribute=0)|list %}
-    <div class="eig-kolommen">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="eig-kolommen" style="flex:1 1 300px">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
+      <select name="afmeting_voertuig" id="afmeting_sel" style="width:220px">
+        <option value="">Afmeting voertuig</option>
+        {% for o in options['afmeting_voertuig'] %}<option {% if t['afmeting_voertuig'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+        <option value="__nieuw__">+ Optie toevoegen…</option>
+      </select>
+      <input type="hidden" name="nieuwe_afmeting_voertuig" id="nieuwe_afmeting_voertuig" value="">
+    </div>
   </div>
   <details style="grid-column:1/-1"{% if ob_gekozen %} open{% endif %}>
     <summary class="lbl" style="cursor:pointer">Opbouwtypes * ({{ ob_gekozen|length }} gekozen)</summary>
@@ -3250,6 +3277,7 @@ table.een-regel tr:hover td{background:#deecf9}
   }
   keuzeMetNieuw('afdeling_sel', 'nieuwe_afdeling', 'Naam van het land:');
   keuzeMetNieuw('laden_met_sel', 'nieuwe_laden_met', 'Nieuwe omschrijving voor Laden met:');
+  keuzeMetNieuw('afmeting_sel', 'nieuwe_afmeting_voertuig', 'Nieuwe afmeting voertuig:');
   // bijzonderheden laden: toevoegen of wijzigen
   function keuzeEdit(selId, nieuwId, wijzigId, vraagNieuw, vraagWijzig) {
     const sel = document.getElementById(selId), hid = document.getElementById(nieuwId), wij = document.getElementById(wijzigId);

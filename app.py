@@ -507,7 +507,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.150 - 17-10-2026 13:35"
+APP_VERSIE = "1.152 - 17-10-2026 16:50"
 
 
 @app.after_request
@@ -2765,10 +2765,11 @@ table.een-regel tr:hover td{background:#deecf9}
   {{ f('date') }}
 
   {{ f('afdeling') }}
-  {{ f('referentie') }}
+  <div style="grid-column:span 2;display:flex;flex-direction:column;gap:4px">
+    <span class="lbl">{{ F['notes'][0] }}</span>{{ ctl('notes') }}
+  </div>
   {{ f('invoice_status') }}
-  <span></span><span></span>
-  {{ f('notes', True) }}
+  <span class="lbl">{{ F['referentie'][0] }}</span>{{ ctl('referentie') }}
 
   {{ f('status') }}
   <span class="lbl">Tijdstip</span>

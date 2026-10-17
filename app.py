@@ -177,6 +177,9 @@ CREATE TABLE IF NOT EXISTS voertuigtype_opties (
     naam TEXT PRIMARY KEY
 );
 INSERT OR IGNORE INTO voertuigtype_opties (naam) VALUES ('Trekker met Oplegger'), ('Vrachtwagen combinatie');
+CREATE TABLE IF NOT EXISTS status_opties (
+    naam TEXT PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS opbouwtype_opties (
     naam TEXT PRIMARY KEY
 );
@@ -359,6 +362,9 @@ def init_db():
     en de omgevingsvariabele ADMIN_PASSWORD is gezet."""
     db = sqlite3.connect(DB_PATH)
     db.executescript(SCHEMA)
+    if db.execute("SELECT COUNT(*) FROM status_opties").fetchone()[0] == 0:
+        db.executemany("INSERT INTO status_opties (naam) VALUES (?)",
+                       [(n,) for n in STATUSES + ["factureren", "gefactureerd"]])
     # lijst met landcodes voor Beheer: eenmalig gevuld bij het aanmaken, daarna beheer je de lijst zelf
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'landcodes'").fetchone():
         db.execute("CREATE TABLE landcodes (naam TEXT PRIMARY KEY)")
@@ -492,7 +498,7 @@ def current_user():
 
 @app.context_processor
 def inject_globals():
-    return {"user": current_user(), "STATUSES": STATUSES, "SOORTEN": SOORTEN,
+    return {"user": current_user(), "STATUSES": status_lijst(), "SOORTEN": SOORTEN,
             "TIJD_OPTIES": TIJD_OPTIES, "APP_VERSIE": APP_VERSIE,
             "LAADTIJD_VAN_OPTIES": LAADTIJD_VAN_OPTIES, "LAADTIJD_TOT_OPTIES": LAADTIJD_TOT_OPTIES,
             # keuzelijst landcode in relaties: (code, naam) uit de lijst in Beheer
@@ -501,7 +507,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.146 - 17-10-2026 12:40"
+APP_VERSIE = "1.147 - 17-10-2026 12:55"
 
 
 @app.after_request
@@ -754,7 +760,7 @@ def parse_transport_form():
     # zolang het transport in de eerste twee stappen zit, bepaalt de vervoerder de status
     if data["status"] in ("nog indelen", "ingedeeld"):
         data["status"] = "ingedeeld" if data["carrier_id"] else "nog indelen"
-    if data["status"] not in STATUSES:
+    if data["status"] not in status_lijst():
         errors.append("Ongeldige status.")
     # tijdstip en tekst alleen bewaren bij de status waar ze bij horen
     if data["status"] not in ("onderweg laden", "onderweg lossen"):
@@ -1127,7 +1133,7 @@ def render_form(t, title, action):
                        key=lambda n: (OPBOUW_VOORAAN.index(n) if n in OPBOUW_VOORAAN else len(OPBOUW_VOORAAN), n))
     eig_groepen = [(VOERTUIG_SOORTEN[s], [(s, r["naam"]) for r in db.execute(
         f"SELECT naam FROM {tabel} ORDER BY naam")]) for s, tabel in VOERTUIG_EIGENSCHAP_SOORTEN]
-    opties = dict(OPTIONS, afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
+    opties = dict(OPTIONS, status=status_lijst(db), afdeling=afdelingen, laden_met=laden_met, email_planning=ep, **bz_opties)
     return render_template("transport_form.html", t=t, title=title, action=action,
                            regels=regels, extra=extra, extra_los=extra_los, fields=TRANSPORT_FIELDS, options=opties,
                            relations=relations, rels=rels, laad_label=laad_label, los_label=los_label,
@@ -1199,7 +1205,7 @@ def transports():
                 " OR ll.code LIKE ? OR lo.code LIKE ?"
                 " OR ll.naam LIKE ? OR ll.plaats LIKE ? OR lo.naam LIKE ? OR lo.plaats LIKE ?)")
         params += [f"%{q}%", f"%{datum}%"] + [f"%{q}%"] * 10
-    if status in STATUSES:
+    if status in status_lijst():
         sql += " AND t.status = ?"
         params.append(status)
     sql += " ORDER BY COALESCE(t.laad_datum, t.date, t.created_at) DESC, t.id DESC"
@@ -1350,7 +1356,7 @@ def transport_status(tid):
     t = db.execute("SELECT id, status FROM transports WHERE id = ?", (tid,)).fetchone()
     if t is None:
         abort(404)
-    if new in STATUSES and new != t["status"]:
+    if new in status_lijst() and new != t["status"]:
         now = now_str()
         db.execute("UPDATE transports SET status = ?, updated_at = ? WHERE id = ?",
                    (new, now, tid))
@@ -2024,6 +2030,8 @@ BEHEER_LIJSTEN = {
     "bijzonderheden": {"tabel": "bijzonderheden_opties", "kolommen": BIJZ_KOLOMMEN,
                        "titel": "Bijzonderheden laden en lossen",
                        "uitleg": "Deze lijst zie je als keuzemenu bij Bijzonderheden laden én Bijzonderheden lossen op het transportformulier."},
+    "status": {"tabel": "status_opties", "kolommen": [], "titel": "Status", "orden": "rowid",
+               "uitleg": "Deze lijst is het keuzemenu Status op het transport. De volgorde is de volgorde waarin je ze hier invoert."},
     "voertuigtype": {"tabel": "voertuigtype_opties", "kolommen": [], "titel": "Voertuigtype",
                      "uitleg": "Deze lijst is het keuzemenu Voertuigtype."},
     "opbouwtype": {"tabel": "opbouwtype_opties", "kolommen": [], "titel": "Opbouwtype",
@@ -2042,6 +2050,13 @@ BEHEER_LIJSTEN = {
 }
 
 
+def status_lijst(db=None):
+    """De statussen uit Beheer, in de ingevoerde volgorde."""
+    db = db or get_db()
+    namen = [r["naam"] for r in db.execute("SELECT naam FROM status_opties ORDER BY rowid")]
+    return namen or list(STATUSES)
+
+
 def _lijst(sleutel):
     if sleutel not in BEHEER_LIJSTEN:
         abort(404)
@@ -2057,7 +2072,7 @@ def beheer():
         gekozen = None  # geen pop-up openen
     lijsten = []
     for sleutel, info in BEHEER_LIJSTEN.items():
-        namen = [r["naam"] for r in db.execute(f"SELECT naam FROM {info['tabel']} ORDER BY naam")]
+        namen = [r["naam"] for r in db.execute(f"SELECT naam FROM {info['tabel']} ORDER BY {info.get('orden', 'naam')}")]
         gebruik = {}
         for kolom in info["kolommen"]:
             for r in db.execute(f"SELECT {kolom} AS k, COUNT(*) AS n FROM transports "

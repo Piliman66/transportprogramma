@@ -507,7 +507,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.149 - 17-10-2026 13:20"
+APP_VERSIE = "1.150 - 17-10-2026 13:35"
 
 
 @app.after_request
@@ -3885,6 +3885,12 @@ function lrWis(knop) { knop.parentElement.remove(); }
 "beheer.html": """{% extends "base.html" %}{% block content %}
 <h2>Beheer</h2>
 <p>Kies een lijst. Die opent in een venster waarin je namen kunt wijzigen, toevoegen of verwijderen.</p>
+<script>
+function lijstKeuze(sel) {
+  var ok = sel.value !== '';
+  sel.form.querySelectorAll('button.wijzig, button.verwijder').forEach(function (b) { b.disabled = !ok; });
+}
+</script>
 <select id="lijst_kies" style="max-width:320px" onchange="openLijst(this.value); this.value='';">
   <option value="">— kies een lijst —</option>
   {% for l in lijsten %}<option value="{{ l.sleutel }}">{{ l.titel }}</option>{% endfor %}
@@ -3897,19 +3903,19 @@ function lrWis(knop) { knop.parentElement.remove(); }
 <p>{{ l.uitleg }}</p>
 
 <form method="post" class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
-  <label>Kies</label>
-  <select name="oud" required style="max-width:320px">
+  <label>Bestaande naam</label>
+  <select name="oud" required style="max-width:320px" onchange="lijstKeuze(this)">
     <option value="">— kies een naam —</option>
     {% for n in l.namen %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
   </select>
-  <input name="naam" placeholder="Nieuwe naam" style="max-width:320px">
-  <button formaction="{{ url_for('beheer_wijzig', sleutel=l.sleutel) }}">Wijzig</button>
-  <button class="gevaar" formaction="{{ url_for('beheer_verwijder', sleutel=l.sleutel) }}"
+  <input name="naam" placeholder="Wijzig naar" style="max-width:320px">
+  <button class="wijzig" disabled formaction="{{ url_for('beheer_wijzig', sleutel=l.sleutel) }}">Wijzig gekozen naam</button>
+  <button class="gevaar verwijder" disabled formaction="{{ url_for('beheer_verwijder', sleutel=l.sleutel) }}"
           onclick="return confirm('Weet je zeker dat je dit item uit de lijst wilt verwijderen? Bestaande transporten houden hun waarde. Dit kan niet ongedaan worden gemaakt.')">Verwijderen</button>
 </form>
 
 <form method="post" action="{{ url_for('beheer_nieuw', sleutel=l.sleutel) }}" class="row" style="margin-bottom:12px">
-  <input name="naam" placeholder="Nieuwe toevoegen" required style="max-width:320px">
+  <input name="naam" placeholder="Nieuw item toevoegen" required style="max-width:320px">
   <button>+ Toevoegen</button>
 </form>
 

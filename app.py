@@ -15,7 +15,9 @@ from jinja2 import DictLoader
 from werkzeug.security import check_password_hash, generate_password_hash
 
 DB_PATH = os.environ.get("DB_PATH", "transport_v2.db")
-SECRET_KEY = os.environ.get("SECRET_KEY", "wijzig-dit-in-productie")
+# Zet SECRET_KEY als omgevingsvariabele. Zonder die waarde wordt bij elke start een nieuwe sleutel gemaakt
+# (gebruikers worden dan bij een herstart uitgelogd). Staat er nooit een vaste sleutel in de code.
+SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
 STATUSES = ["nog indelen", "ingedeeld", "onderweg laden", "onderweg lossen", "afgeleverd", "afmelden"]
 # tijdstippen van 06:00 tot 21:00 in stappen van 15 minuten
@@ -499,7 +501,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.144 - 17-10-2026 00:05"
+APP_VERSIE = "1.145 - 17-10-2026 08:55"
 
 
 @app.after_request

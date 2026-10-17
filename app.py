@@ -511,7 +511,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.156 - 17-10-2026 17:25"
+APP_VERSIE = "1.158 - 17-10-2026 18:10"
 
 
 @app.after_request
@@ -2887,9 +2887,9 @@ table.een-regel tr:hover td{background:#deecf9}
   <div style="grid-column:1/-1">
     <span class="lbl">Voertuigtype *</span>
     {% set vt_vals = vt_gekozen|map(attribute=0)|list %}
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div class="eig-kolommen" style="flex:1 1 300px">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
-      <select name="afmeting_voertuig" id="afmeting_sel" style="width:220px">
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">
+      <div class="eig-kolommen">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
+      <select name="afmeting_voertuig" id="afmeting_sel" style="width:220px;border:none;background:transparent;font:inherit;color:inherit;padding:0">
         <option value="">Afmeting voertuig</option>
         {% for o in options['afmeting_voertuig'] %}<option {% if t['afmeting_voertuig'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
         <option value="__nieuw__">+ Optie toevoegen…</option>

@@ -470,6 +470,18 @@ def init_db():
         if "adres_nr" not in {r[1] for r in db.execute("PRAGMA table_info(laadregels)")}:
             db.execute("ALTER TABLE laadregels ADD COLUMN adres_nr INTEGER NOT NULL DEFAULT 1")
         db.execute("PRAGMA user_version = 10")
+    # versie 11: Vrachtwagen 7,5 ton als voertuigtype (eenmalig, zodat een verwijderde optie niet terugkomt)
+    if db.execute("PRAGMA user_version").fetchone()[0] < 11:
+        db.execute("INSERT OR IGNORE INTO voertuigtype_opties (naam) VALUES ('Vrachtwagen 7,5 ton')")
+        db.execute("PRAGMA user_version = 11")
+    # versie 12: Vrachtwagen tot 12 ton en Vrachtwagen tot 3,5 ton als voertuigtype (eenmalig)
+    if db.execute("PRAGMA user_version").fetchone()[0] < 12:
+        db.execute("INSERT OR IGNORE INTO voertuigtype_opties (naam) VALUES ('Vrachtwagen tot 12 ton'), ('Vrachtwagen tot 3,5 ton')")
+        db.execute("PRAGMA user_version = 12")
+    # versie 13: Vrachtwagen 7,5 ton heet voortaan Vrachtwagen tot 7,5 ton
+    if db.execute("PRAGMA user_version").fetchone()[0] < 13:
+        db.execute("UPDATE voertuigtype_opties SET naam = 'Vrachtwagen tot 7,5 ton' WHERE naam = 'Vrachtwagen 7,5 ton'")
+        db.execute("PRAGMA user_version = 13")
     have_rel = {r[1] for r in db.execute("PRAGMA table_info(relaties)")}
     for name, _, kind in RELATION_FIELDS:
         if name not in have_rel:
@@ -511,7 +523,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.158 - 17-10-2026 18:10"
+APP_VERSIE = "1.161 - 17-10-2026 18:35"
 
 
 @app.after_request
@@ -1143,6 +1155,10 @@ def render_form(t, title, action):
     # voertuigeisen: bij een fout de ingevulde keuzes, anders wat in de database staat
     ve = t["_voertuig"] if isinstance(t, dict) and "_voertuig" in t else voertuigeisen_uit_db(tid)
     vt_opties = [r["naam"] for r in db.execute("SELECT naam FROM voertuigtype_opties ORDER BY naam")]
+    # vaste volgorde voor het voertuigtype-blok: kolom voor kolom (links, midden, rechts); de overige op naam
+    VT_VOORAAN = ["Trekker met Oplegger", "Vrachtwagen combinatie", "Vrachtwagen tot 3,5 ton",
+                  "Vrachtwagen tot 7,5 ton", "Vrachtwagen tot 12 ton"]
+    vt_opties = sorted(vt_opties, key=lambda n: (VT_VOORAAN.index(n) if n in VT_VOORAAN else len(VT_VOORAAN), n))
     # Huif, Tautliner, Kastenwagen en Koelwagen staan vooraan (linksboven); de overige op naam
     OPBOUW_VOORAAN = ["Huif", "Tautliner", "Kastenwagen", "Koelwagen"]
     ob_opties = sorted((r["naam"] for r in db.execute("SELECT naam FROM opbouwtype_opties")),
@@ -2887,10 +2903,10 @@ table.een-regel tr:hover td{background:#deecf9}
   <div style="grid-column:1/-1">
     <span class="lbl">Voertuigtype *</span>
     {% set vt_vals = vt_gekozen|map(attribute=0)|list %}
-    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">
-      <div class="eig-kolommen">{% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,auto);grid-template-rows:repeat(2,auto);grid-auto-flow:column;justify-content:start;gap:6px 36px;align-items:center">
+      {% for o in vt_opties %}<label class="eig-optie"><input type="checkbox" name="voertuigtype" value="{{ o }}"{% if o in vt_vals %} checked{% endif %}> {{ o }}</label>{% endfor %}
       <select name="afmeting_voertuig" id="afmeting_sel" style="width:220px;border:none;background:transparent;font:inherit;color:inherit;padding:0">
-        <option value="">Afmeting voertuig</option>
+        <option value="">Afmetingen voertuig</option>
         {% for o in options['afmeting_voertuig'] %}<option {% if t['afmeting_voertuig'] == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
         <option value="__nieuw__">+ Optie toevoegen…</option>
       </select>

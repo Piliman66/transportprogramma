@@ -507,7 +507,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.147 - 17-10-2026 12:55"
+APP_VERSIE = "1.148 - 17-10-2026 13:05"
 
 
 @app.after_request
@@ -2205,6 +2205,8 @@ th{font-weight:600;color:#605e5c;font-size:13px}
 tr:hover td{background:#f3f2f1}
 .badge.nog-indelen{background:#f8d7da;color:#842029}
 .badge.ingedeeld{background:#c7ecd1;color:#0b4d1f}
+.badge.factureren{background:#fff3b0;color:#5c4a00}
+.badge.gefactureerd{background:#e9d8fd;color:#4b2a7b}
 input,select,textarea{padding:6px 8px;border:1px solid #8a8886;border-radius:2px;font:inherit;width:100%;box-sizing:border-box;background:#fff;color:#323130}
 input:focus,select:focus,textarea:focus{outline:2px solid #0078d4;outline-offset:-1px;border-color:#0078d4}
 input[type=checkbox]{width:auto}
@@ -2323,7 +2325,7 @@ table.een-regel tr:hover td{background:#deecf9}
   <td><a href="{{ url_for('transport_edit', tid=t['id']) }}">{{ t['number'] }}</a></td>
   <td data-iso="{{ (t['laad_datum'] or '')[:10] }}" title="{{ t['laad_datum']|nl_datum }}">{{ (t['laad_datum']|nl_datum)[:10] }}</td>
   <td>{{ t['los_datum']|nl_datum }}</td>
-  <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover geen-lijn" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
+  <td>{% set onderweg = t['status'] in ('onderweg laden', 'onderweg lossen') %}{% if onderweg %}<span class="info-hover geen-lijn" tabindex="0">{% endif %}<span class="badge {% if t['status'] == 'nog indelen' %}nog-indelen{% elif t['status'] == 'ingedeeld' %}ingedeeld{% elif t['status'] == 'factureren' %}factureren{% elif t['status'] == 'gefactureerd' %}gefactureerd{% endif %}">{{ t['status'] }}</span>{% if onderweg %}<span class="info-box"><b>Tijdstip {{ 'laden' if t['status'] == 'onderweg laden' else 'lossen' }}</b><br>{{ t['status_tijd'] or '–' }}</span></span>{% endif %}</td>
   <td>{% if t['customer_name'] %}<span class="info-hover geen-lijn" tabindex="0">{{ t['customer_name'] }}<span class="info-box"><b>Opdrachtgever</b><br>Telefoon: {{ t['customer_tel'] or '–' }}<br>E-mail: {{ t['customer_email'] or '–' }}</span></span>{% endif %}</td>
   <td>{{ t['referentie'] or '' }}</td>
   <td>{{ t['laad_plaats'] or '' }}{% for nr, pl, pc in t['extra_laad'] %}<br>{{ pl or '' }}{% endfor %}</td>

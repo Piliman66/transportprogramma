@@ -501,7 +501,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.145 - 17-10-2026 08:55"
+APP_VERSIE = "1.146 - 17-10-2026 12:40"
 
 
 @app.after_request
@@ -1166,6 +1166,12 @@ def logout():
 
 
 # ---------- routes: transporten ----------
+
+@app.route("/facturatie")
+@login_required
+def facturatie():
+    return render_template("facturatie.html")
+
 
 @app.route("/transporten")
 @login_required
@@ -2244,6 +2250,7 @@ table.een-regel tr:hover td{background:#deecf9}
     <a href="{{ url_for('transports') }}" class="{{ 'actief' if ep.startswith('/transporten') }}">Transporten</a>
     <a href="{{ url_for('relaties') }}" class="{{ 'actief' if ep.startswith('/relaties') }}">Relaties</a>
     <a href="{{ url_for('locaties') }}" class="{{ 'actief' if ep.startswith('/locaties') }}">Locaties</a>
+    <a href="{{ url_for('facturatie') }}" class="{{ 'actief' if ep.startswith('/facturatie') }}">Facturatie</a>
     {% if user['role'] == 'beheerder' %}
     <a href="{{ url_for('beheer') }}" class="{{ 'actief' if ep.startswith('/beheer') }}">Beheer</a>
     <a href="{{ url_for('users') }}" class="{{ 'actief' if ep.startswith('/gebruikers') }}">Gebruikers</a>
@@ -3640,6 +3647,10 @@ table.een-regel tr:hover td{background:#deecf9}
 </script>
 {% endblock %}""",
 
+"facturatie.html": """{% extends "base.html" %}{% block content %}
+<h1>Facturatie</h1>
+<p>Dit scherm is nog leeg. Hier komt het facturatieoverzicht.</p>
+{% endblock %}""",
 "relatie_detail.html": """{% extends "base.html" %}{% block content %}
 {% macro card(title, names) %}
 <div class="card">

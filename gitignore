@@ -1,0 +1,16 @@
+# Databases en geïmporteerde bestanden bevatten persoonsgegevens: nooit in Git
+*.db
+*.db-journal
+*.sqlite
+*.xlsx
+*.xls
+*.csv
+
+# Geheimen
+.env
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/

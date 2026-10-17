@@ -127,7 +127,7 @@ TRANSPORT_FIELDS = [
     ("palletbon_verstuurd_op", "Palletbon verstuurd op", "date"),
     ("digitaal_factureren", "Digitaal factureren", "bool"),
     ("afgehandeld", "Afgehandeld", "bool"),
-    ("notes", "Dossierinfo", "textarea"),
+    ("notes", "Dossier info", "textarea"),
 ]
 BOOL_NAMES = [n for n, _, k in TRANSPORT_FIELDS if k == "bool"]
 TRANSPORT_NAMES = [n for n, _, _ in TRANSPORT_FIELDS]
@@ -507,7 +507,7 @@ def inject_globals():
 
 
 # versienummer en datum/tijd van de update: bij elke nieuwe update aanpassen
-APP_VERSIE = "1.153 - 17-10-2026 16:55"
+APP_VERSIE = "1.154 - 17-10-2026 17:00"
 
 
 @app.after_request
@@ -2765,9 +2765,7 @@ table.een-regel tr:hover td{background:#deecf9}
   {{ f('date') }}
 
   {{ f('afdeling') }}
-  <div style="grid-column:span 2;display:flex;flex-direction:column;gap:4px">
-    <span class="lbl">{{ F['notes'][0] }}</span>{{ ctl('notes') }}
-  </div>
+  <span class="lbl">{{ F['notes'][0] }}</span>{{ ctl('notes') }}
   {{ f('referentie') }}
   {{ f('invoice_status') }}
 
